@@ -142,15 +142,18 @@ impl<W: EdgeWeight> NeighborBuf<W> {
             "fill_from_offsets: count {count} past scratch of {}",
             self.offsets.len()
         );
-        self.support.clear();
-        self.weights.clear();
-        self.support.reserve(count);
-        self.weights.reserve(count);
         // Disjoint field borrows: reading `offsets` while writing the other two.
-        for &off in &self.offsets[..count] {
-            self.support.push(map(off));
-            self.weights.push(weight);
-        }
+        // `extend` over an exact-size iterator reserves once and skips the
+        // per-element capacity check a `push` loop repeats.
+        let Self {
+            support,
+            weights,
+            offsets,
+        } = self;
+        support.clear();
+        weights.clear();
+        support.extend(offsets[..count].iter().map(|&off| map(off)));
+        weights.extend(core::iter::repeat_n(weight, count));
     }
 
     /// Number of edges held.

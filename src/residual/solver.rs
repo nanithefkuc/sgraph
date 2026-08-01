@@ -17,9 +17,15 @@ pub struct Report {
 }
 
 /// Reusable RREF solver over one `fff` field.
+///
+/// The coefficient matrix is stored **packed**, exactly like the symbol matrix:
+/// `columns * F::BYTES` bytes per row. That is what lets a row operation go
+/// through `fff::ops` instead of a scalar per-element loop — at wide geometries
+/// the coefficient side is the same order of work as the symbol side, and a
+/// scalar loop there costs more than the entire symbol reduction.
 #[derive(Debug)]
 pub struct Solver<F: FieldKernels> {
-    coefficients: Vec<F::Elem>,
+    coefficients: Vec<u8>,
     symbols: Vec<u8>,
     pivot_of_col: Vec<usize>,
     recovered: Vec<(VarId, usize)>,
@@ -59,12 +65,12 @@ impl<F: FieldKernels> Solver<F> {
     pub fn solve(&mut self, system: &System<'_, F>) -> Result<Report, SolveError> {
         self.clear_outcome();
         let columns = system.columns.len();
-        let Some((coefficient_count, symbol_bytes)) =
+        let Some((coefficient_bytes, symbol_bytes)) =
             checked_geometry::<F>(system.rows, columns, system.symbol_len)
         else {
             return Err(geometry_error::<F>(system.rows, columns, system.symbol_len));
         };
-        debug_assert_eq!(system.coefficients.len(), coefficient_count);
+        debug_assert_eq!(system.coefficients.len(), coefficient_bytes);
         debug_assert_eq!(system.symbols.len(), symbol_bytes);
 
         self.coefficients.clear();
@@ -75,10 +81,10 @@ impl<F: FieldKernels> Solver<F> {
         self.pivot_of_col.resize(columns, usize::MAX);
         self.symbol_len = system.symbol_len;
 
+        let stride = columns * F::BYTES;
         let rank = self.reduce_to_rref(system.rows, columns);
         for row in 0..system.rows {
-            let coefficients = &self.coefficients[row * columns..][..columns];
-            if coefficients.iter().all(|coefficient| coefficient.is_zero())
+            if row_is_zero::<F>(&self.coefficients[row * stride..][..stride])
                 && self.symbols[row * self.symbol_len..][..self.symbol_len]
                     .iter()
                     .any(|byte| *byte != 0)
@@ -91,8 +97,7 @@ impl<F: FieldKernels> Solver<F> {
         for (column, &var) in system.columns.iter().enumerate() {
             let pivot = self.pivot_of_col[column];
             let determined = pivot != usize::MAX
-                && self.coefficients[pivot * columns..][..columns]
-                    .iter()
+                && elems::<F>(&self.coefficients[pivot * stride..][..stride])
                     .filter(|coefficient| !coefficient.is_zero())
                     .count()
                     == 1;
@@ -109,23 +114,41 @@ impl<F: FieldKernels> Solver<F> {
         })
     }
     fn reduce_to_rref(&mut self, rows: usize, columns: usize) -> usize {
+        // Every `fff` field is a binary extension field, so subtraction is
+        // addition and one `mul_add` expresses `row -= factor * pivot` exactly.
+        // The whole vectorised elimination below rests on that.
+        debug_assert!(F::Elem::ONE.sub(F::Elem::ONE).is_zero());
+        debug_assert_eq!(
+            F::Elem::ONE.sub(F::Elem::ZERO),
+            F::Elem::ONE.add(F::Elem::ZERO)
+        );
+
+        let stride = columns * F::BYTES;
+        // Below one vector's worth of coefficients, two kernel dispatches cost
+        // more than the handful of table multiplies they replace. Measured on
+        // the `solve/rref` benchmark: at 8 columns the vectorised path is 19%
+        // slower, at 32 it is 31% faster and at 64 it is 55% faster.
+        let wide = stride >= NARROW_ROW_BYTES;
         let mut pivot_row = 0usize;
         for column in 0..columns {
-            let selected =
-                (pivot_row..rows).find(|&row| !self.coefficients[row * columns + column].is_zero());
+            let selected = (pivot_row..rows)
+                .find(|&row| !cell::<F>(&self.coefficients, stride, row, column).is_zero());
             let Some(selected) = selected else {
                 continue;
             };
             if selected != pivot_row {
-                swap_rows(&mut self.coefficients, columns, selected, pivot_row);
+                swap_rows(&mut self.coefficients, stride, selected, pivot_row);
                 swap_rows(&mut self.symbols, self.symbol_len, selected, pivot_row);
             }
 
-            let pivot = self.coefficients[pivot_row * columns + column];
+            let pivot = cell::<F>(&self.coefficients, stride, pivot_row, column);
             if !pivot.is_one() {
                 let inverse = pivot.inv();
-                for coefficient in &mut self.coefficients[pivot_row * columns..][..columns] {
-                    *coefficient = coefficient.mul(inverse);
+                let row = &mut self.coefficients[pivot_row * stride..][..stride];
+                if wide {
+                    fff::ops::mul_assign::<F>(row, inverse);
+                } else {
+                    scale_row::<F>(row, inverse);
                 }
                 fff::ops::mul_assign::<F>(
                     &mut self.symbols[pivot_row * self.symbol_len..][..self.symbol_len],
@@ -133,9 +156,9 @@ impl<F: FieldKernels> Solver<F> {
                 );
             }
 
-            let coefficient_split = pivot_row * columns;
+            let coefficient_split = pivot_row * stride;
             let (coeff_head, coeff_tail) = self.coefficients.split_at_mut(coefficient_split);
-            let (pivot_coefficients, coeff_rest) = coeff_tail.split_at_mut(columns);
+            let (pivot_coefficients, coeff_rest) = coeff_tail.split_at_mut(stride);
             let symbol_split = pivot_row * self.symbol_len;
             let (symbol_head, symbol_tail) = self.symbols.split_at_mut(symbol_split);
             let (pivot_symbol, symbol_rest) = symbol_tail.split_at_mut(self.symbol_len);
@@ -145,27 +168,31 @@ impl<F: FieldKernels> Solver<F> {
                 }
                 let (coefficient_row, symbol_row) = if row < pivot_row {
                     (
-                        &mut coeff_head[row * columns..][..columns],
+                        &mut coeff_head[row * stride..][..stride],
                         &mut symbol_head[row * self.symbol_len..][..self.symbol_len],
                     )
                 } else {
                     let offset = row - pivot_row - 1;
                     (
-                        &mut coeff_rest[offset * columns..][..columns],
+                        &mut coeff_rest[offset * stride..][..stride],
                         &mut symbol_rest[offset * self.symbol_len..][..self.symbol_len],
                     )
                 };
-                let factor = coefficient_row[column];
+                let factor = F::read(&coefficient_row[column * F::BYTES..][..F::BYTES]);
                 if factor.is_zero() {
                     continue;
                 }
-                for (coefficient, pivot_coefficient) in coefficient_row
-                    .iter_mut()
-                    .zip(pivot_coefficients.iter().copied())
-                {
-                    *coefficient = coefficient.sub(factor.mul(pivot_coefficient));
+                if wide {
+                    // One prepared coefficient drives both halves of the row
+                    // operation, so the backend resolves `factor` once rather
+                    // than once per buffer.
+                    let factor = fff::ops::Coeff::<F>::new(factor);
+                    fff::ops::mul_add_with::<F>(coefficient_row, &factor, pivot_coefficients);
+                    fff::ops::mul_add_with::<F>(symbol_row, &factor, pivot_symbol);
+                } else {
+                    fused_row::<F>(coefficient_row, pivot_coefficients, factor);
+                    fff::ops::mul_add::<F>(symbol_row, factor, pivot_symbol);
                 }
-                fff::ops::mul_add::<F>(symbol_row, factor, pivot_symbol);
             }
 
             self.pivot_of_col[column] = pivot_row;
@@ -218,4 +245,43 @@ fn swap_rows<T>(matrix: &mut [T], stride: usize, first: usize, second: usize) {
     };
     let (head, tail) = matrix.split_at_mut(high * stride);
     head[low * stride..][..stride].swap_with_slice(&mut tail[..stride]);
+}
+
+/// One coefficient of a packed row-major matrix.
+fn cell<F: FieldKernels>(matrix: &[u8], stride: usize, row: usize, column: usize) -> F::Elem {
+    F::read(&matrix[row * stride + column * F::BYTES..][..F::BYTES])
+}
+
+/// Elements of one packed coefficient row.
+fn elems<F: FieldKernels>(row: &[u8]) -> impl Iterator<Item = F::Elem> + '_ {
+    row.chunks_exact(F::BYTES).map(F::read)
+}
+
+/// Whether every coefficient in a packed row is zero.
+///
+/// This reads elements rather than testing the bytes directly: an all-zero byte
+/// encoding of the field's zero is a property of every field `fff` ships today,
+/// but it is not part of the `fff` field contract, and the cost of honouring
+/// the contract here is nil.
+fn row_is_zero<F: FieldKernels>(row: &[u8]) -> bool {
+    elems::<F>(row).all(Elem::is_zero)
+}
+
+/// Coefficient-row width below which a scalar loop beats a kernel dispatch.
+const NARROW_ROW_BYTES: usize = 32;
+
+/// `row *= scale`, elementwise over a packed row.
+fn scale_row<F: FieldKernels>(row: &mut [u8], scale: F::Elem) {
+    for cell in row.chunks_exact_mut(F::BYTES) {
+        F::write(cell, F::read(cell).mul(scale));
+    }
+}
+
+/// `row -= factor * pivot`, elementwise over two packed rows of equal width.
+fn fused_row<F: FieldKernels>(row: &mut [u8], pivot: &[u8], factor: F::Elem) {
+    debug_assert_eq!(row.len(), pivot.len());
+    let pivot = pivot.chunks_exact(F::BYTES);
+    for (cell, pivot) in row.chunks_exact_mut(F::BYTES).zip(pivot) {
+        F::write(cell, F::read(cell).sub(factor.mul(F::read(pivot))));
+    }
 }

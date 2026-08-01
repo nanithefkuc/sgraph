@@ -269,6 +269,85 @@ fn retiring_one_check_preserves_a_vacant_later_id() {
     assert_eq!(peeler.check_count(), 2);
 }
 
+/// A variable learned before any check names it has no reverse-adjacency slot,
+/// because `waiting` is grown only where a check registers a waiter. The first
+/// check that names it must still fold it out, and the ring that anchors on that
+/// check's residual support must still accept an *earlier* live variable named by
+/// a later check — `Ring::ensure` grows at the front as well as the back.
+#[test]
+fn a_check_naming_an_already_known_variable_still_cascades() {
+    let mut peeler = Peeler::<Binary>::new(2, config(16)).unwrap();
+    let v0 = [0x11, 0x22];
+    let v1 = [0x33, 0x44];
+    let v2 = [0x55, 0x66];
+    let v5 = [0x77, 0x88];
+    let mut recovered = Vec::new();
+
+    // Learned first: nothing is waiting on variable 0, so it gets no slot.
+    peeler.learn_copy(VarId::new(0), &v0).unwrap();
+
+    // Names the already-known variable 0 plus the unknown variable 5. Variable 0
+    // folds out at ingest and the degree-one residual peels variable 5. This is
+    // also where `waiting` first anchors, at index 5.
+    let mut rhs = v0;
+    xor_assign(&mut rhs, &v5);
+    peeler
+        .push_check(
+            CheckId::new(0),
+            Edges::new(&[VarId::new(0), VarId::new(5)], &[Binary; 2]).unwrap(),
+            &rhs,
+        )
+        .unwrap();
+    peeler.drain_recovered_into(&mut recovered);
+    assert_eq!(recovered, [VarId::new(5)]);
+    assert_eq!(
+        peeler.variable_state(VarId::new(5)),
+        VariableState::Known(&v5)
+    );
+
+    // Names the now-known variable 5 and two unknowns below the anchor, forcing
+    // `waiting` to grow at the front.
+    let mut rhs = v5;
+    xor_assign(&mut rhs, &v1);
+    xor_assign(&mut rhs, &v2);
+    peeler
+        .push_check(
+            CheckId::new(1),
+            Edges::new(&[VarId::new(5), VarId::new(1), VarId::new(2)], &[Binary; 3]).unwrap(),
+            &rhs,
+        )
+        .unwrap();
+    assert!(peeler.has_stalled());
+
+    // Resolving variable 2 must cascade through the front-grown slot to 1.
+    peeler
+        .push_check(
+            CheckId::new(2),
+            Edges::new(&[VarId::new(2)], &[Binary; 1]).unwrap(),
+            &v2,
+        )
+        .unwrap();
+
+    recovered.clear();
+    peeler.drain_recovered_into(&mut recovered);
+    assert_eq!(recovered, [VarId::new(2), VarId::new(1)]);
+    assert_eq!(
+        peeler.variable_state(VarId::new(0)),
+        VariableState::Known(&v0)
+    );
+    assert_eq!(
+        peeler.variable_state(VarId::new(1)),
+        VariableState::Known(&v1)
+    );
+    assert_eq!(
+        peeler.variable_state(VarId::new(2)),
+        VariableState::Known(&v2)
+    );
+    assert_eq!(peeler.known_count(), 4);
+    assert!(!peeler.has_stalled());
+    assert_eq!(peeler.unresolved_count(), 0);
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct Snapshot {
     known: usize,

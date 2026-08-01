@@ -8,10 +8,16 @@ use fff::FieldKernels;
 use fff::field::Elem;
 
 /// Reusable single-pass residual-system builder.
+///
+/// `coefficients` is a **packed** row-major matrix — `columns * F::BYTES` bytes
+/// per row, the same encoding as the symbol matrix — so the solver can drive a
+/// coefficient row through `fff::ops` instead of a scalar per-element loop.
+/// `term_row` stays element-typed because assembling a row means adding
+/// duplicate terms in the field.
 #[derive(Debug)]
 pub struct ResidualBuilder<F: FieldKernels> {
     columns: Vec<VarId>,
-    coefficients: Vec<F::Elem>,
+    coefficients: Vec<u8>,
     symbols: Vec<u8>,
     term_row: Vec<F::Elem>,
     rows: usize,
@@ -166,9 +172,14 @@ impl<'a, F: FieldKernels> RowSink<'a, F> {
             return;
         }
 
+        let start = self.builder.coefficients.len();
         self.builder
             .coefficients
-            .extend_from_slice(&self.builder.term_row);
+            .resize(start + columns * F::BYTES, 0);
+        fff::ops::pack::<F>(
+            &mut self.builder.coefficients[start..],
+            &self.builder.term_row,
+        );
         self.builder.symbols.extend_from_slice(rhs);
         self.builder.rows = rows;
     }
@@ -178,7 +189,7 @@ impl<'a, F: FieldKernels> RowSink<'a, F> {
 #[derive(Debug, Clone, Copy)]
 pub struct System<'a, F: FieldKernels> {
     pub(super) columns: &'a [VarId],
-    pub(super) coefficients: &'a [F::Elem],
+    pub(super) coefficients: &'a [u8],
     pub(super) symbols: &'a [u8],
     pub(super) rows: usize,
     pub(super) symbol_len: usize,
@@ -205,15 +216,15 @@ impl<F: FieldKernels> System<'_, F> {
     }
 }
 
+/// Byte lengths of the coefficient and symbol matrices, or `None` on overflow.
 pub(super) fn checked_geometry<F: FieldKernels>(
     rows: usize,
     columns: usize,
     symbol_len: usize,
 ) -> Option<(usize, usize)> {
-    let coefficient_count = rows.checked_mul(columns)?;
-    coefficient_count.checked_mul(core::mem::size_of::<F::Elem>())?;
+    let coefficient_bytes = rows.checked_mul(columns)?.checked_mul(F::BYTES)?;
     let symbol_bytes = rows.checked_mul(symbol_len)?;
-    Some((coefficient_count, symbol_bytes))
+    Some((coefficient_bytes, symbol_bytes))
 }
 
 pub(super) fn geometry_error<F: FieldKernels>(
@@ -225,7 +236,7 @@ pub(super) fn geometry_error<F: FieldKernels>(
         rows,
         columns,
         symbol_len,
-        coefficient_bytes: core::mem::size_of::<F::Elem>(),
+        coefficient_bytes: F::BYTES,
     }
 }
 

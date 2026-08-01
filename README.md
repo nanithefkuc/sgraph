@@ -120,17 +120,17 @@ bugs get in.
 
 ## Measured throughput
 
-Numbers are the minimum of three interleaved runs, each pinned to one core, on
-an Intel Core Ultra 7 258V under Linux 7.1 with `rustc 1.93.0`, `--all-features`,
+Numbers are the minimum of three runs pinned to one core, on an Intel Core
+Ultra 7 258V under Linux 7.1 with `rustc 1.93.0`, `--all-features`,
 `lto = "thin"`, and 1024-byte symbols. They describe this machine and this
 geometry; re-measure before quoting them anywhere else.
 
 | Case | Geometry | Per operation |
 | --- | --- | --- |
-| `WindowedUniform` neighbours | span 4096, degree 3 / 8 / 32 | 11.0 ns / 29.5 ns / 155 ns per check |
-| `Peeler::push_check` (no ripple) | degree 3 / 8 / 32, 64 live rows | 114 ns / 174 ns / 515 ns per check |
-| Peeling cascade | chain of 16 / 256 hops | 1.33 µs / 24.8 µs per chain |
-| Residual RREF over GF(256) | 8×8 / 32×32 / 64×64 | 1.22 µs / 30.5 µs / 192 µs per solve |
+| `WindowedUniform` neighbours | span 4096, degree 3 / 8 / 32 | 9.9 ns / 20.9 ns / 120 ns per check |
+| `Peeler::push_check` (no ripple) | degree 3 / 8 / 32, 64 live rows | 138 ns / 179 ns / 436 ns per check |
+| Peeling cascade | chain of 16 / 256 hops | 1.18 µs / 22.5 µs per chain |
+| Residual RREF over GF(256) | 8×8 / 32×32 / 64×64 | 1.22 µs / 18.9 µs / 84.7 µs per solve |
 
 Criterion baseline artifacts are machine-specific and are deliberately not
 committed; record the comparison conditions and results instead.

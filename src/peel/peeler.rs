@@ -28,6 +28,13 @@ pub struct Peeler<W: EdgeWeight> {
     known_count: usize,
     rows: Ring<RowSlot<W>>,
     row_count: usize,
+    /// Conservative **lower** bound on `min_var` across every live row.
+    ///
+    /// The invariant is one-sided on purpose: the mark is never above the true
+    /// minimum, so a stale-low mark only costs a wasted scan in
+    /// [`retire_below`](Peeler::retire_below) and can never hide a row that
+    /// must be dropped. `u64::MAX` means no live row has residual support.
+    row_min_low_water: u64,
     waiting: Ring<Vec<CheckId>>,
     ripple: Vec<CheckId>,
     recovered: Vec<VarId>,
@@ -66,6 +73,7 @@ impl<W: EdgeWeight> Peeler<W> {
             known_count: 0,
             rows: Ring::new(config.max_check_span()),
             row_count: 0,
+            row_min_low_water: u64::MAX,
             waiting: Ring::new(config.max_variable_span()),
             ripple: Vec::new(),
             recovered: Vec::new(),
@@ -158,12 +166,10 @@ impl<W: EdgeWeight> Peeler<W> {
     /// state is changed.
     pub fn learn(&mut self, var: VarId, value: Vec<u8>) -> Result<(), GraphError> {
         self.validate_symbol(&value)?;
-        self.preflight_variable(var)?;
-        if matches!(self.variable_state(var), VariableState::Known(_)) {
+        if self.ensure_variable_slot(var)? {
             self.pool.recycle_symbol(value);
             return Ok(());
         }
-        self.ensure_variable_slots(var)?;
         self.apply_known(var, value);
         self.drive_peel();
         Ok(())
@@ -177,11 +183,9 @@ impl<W: EdgeWeight> Peeler<W> {
     /// state is changed.
     pub fn learn_copy(&mut self, var: VarId, value: &[u8]) -> Result<(), GraphError> {
         self.validate_symbol(value)?;
-        self.preflight_variable(var)?;
-        if matches!(self.variable_state(var), VariableState::Known(_)) {
+        if self.ensure_variable_slot(var)? {
             return Ok(());
         }
-        self.ensure_variable_slots(var)?;
         let value = self.pool.take_symbol_copy(value);
         self.apply_known(var, value);
         self.drive_peel();
@@ -195,8 +199,9 @@ impl<W: EdgeWeight> Peeler<W> {
         value: &[u8],
     ) -> Result<(), GraphError> {
         self.validate_symbol(value)?;
-        self.known.check_range(first.get(), last.get())?;
-        self.waiting.check_range(first.get(), last.get())
+        // One ring, one check: the learn path grows only `known`. `waiting` is
+        // grown by `push_check` alone, and never by the batch this preflights.
+        self.known.check_range(first.get(), last.get())
     }
 
     pub(crate) fn learn_copy_preflighted(
@@ -205,10 +210,9 @@ impl<W: EdgeWeight> Peeler<W> {
         value: &[u8],
     ) -> Result<(), GraphError> {
         debug_assert_eq!(value.len(), self.symbol_len);
-        if matches!(self.variable_state(var), VariableState::Known(_)) {
+        if self.ensure_variable_slot(var)? {
             return Ok(());
         }
-        self.ensure_variable_slots(var)?;
         let value = self.pool.take_symbol_copy(value);
         self.apply_known(var, value);
         self.drive_peel();
@@ -240,7 +244,6 @@ impl<W: EdgeWeight> Peeler<W> {
         debug_assert!(matches!(row_slot, RowSlot::Vacant));
         for &var in edges.support() {
             let _ = self.known.ensure(var.get())?;
-            let _ = self.waiting.ensure(var.get())?;
         }
 
         let mut reduced = self.pool.take_symbol_copy(rhs);
@@ -276,6 +279,14 @@ impl<W: EdgeWeight> Peeler<W> {
                 }
             }
             list.push(id);
+        }
+
+        // Lower the mark for the row about to become live. It is only ever
+        // lowered here: when a row's own minimum rises in
+        // `refresh_min_after_removing` the mark is deliberately left stale-low,
+        // which is safe because the mark is a lower bound, never an estimate.
+        if let Some(min) = min_var {
+            self.row_min_low_water = self.row_min_low_water.min(min.get());
         }
 
         let row = CheckRow {
@@ -354,31 +365,46 @@ impl<W: EdgeWeight> Peeler<W> {
             }
         }
 
-        let mut dropped_rows = 0usize;
-        let mut dropped_unresolved = 0usize;
-        {
-            let (rows, pool) = (&mut self.rows, &mut self.pool);
-            for (_, slot) in rows.iter_mut() {
-                let should_drop = matches!(
-                    slot,
-                    RowSlot::Live(row)
-                        if row.min_var.is_some_and(|var| var < horizon)
-                );
-                if !should_drop {
-                    continue;
+        // Every live row's `min_var` is at or above the low-water mark, so once
+        // the mark reaches the horizon no row can qualify and the whole-row walk
+        // is pure cost. On a clean stream every row folds all its neighbours out
+        // at ingest, leaving `min_var` `None` everywhere and the mark at
+        // `u64::MAX`, so the scan never runs.
+        if self.row_min_low_water < horizon.get() {
+            let mut dropped_rows = 0usize;
+            let mut dropped_unresolved = 0usize;
+            let mut low_water = u64::MAX;
+            {
+                let (rows, pool) = (&mut self.rows, &mut self.pool);
+                for (_, slot) in rows.iter_mut() {
+                    let min_var = match slot {
+                        RowSlot::Live(row) => row.min_var,
+                        RowSlot::Vacant | RowSlot::Retired => continue,
+                    };
+                    match min_var {
+                        Some(var) if var < horizon => {}
+                        Some(var) => {
+                            low_water = low_water.min(var.get());
+                            continue;
+                        }
+                        None => continue,
+                    }
+                    let RowSlot::Live(row) = mem::replace(slot, RowSlot::Retired) else {
+                        continue;
+                    };
+                    dropped_rows += 1;
+                    dropped_unresolved += usize::from(row.is_unresolved());
+                    pool.recycle_symbol(row.rhs);
+                    pool.recycle_support(row.support);
+                    pool.recycle_weights(row.weights);
                 }
-                let RowSlot::Live(row) = mem::replace(slot, RowSlot::Retired) else {
-                    continue;
-                };
-                dropped_rows += 1;
-                dropped_unresolved += usize::from(row.is_unresolved());
-                pool.recycle_symbol(row.rhs);
-                pool.recycle_support(row.support);
-                pool.recycle_weights(row.weights);
             }
+            // The scan visited every survivor, so the mark can be tightened to
+            // the exact minimum instead of merely left conservative.
+            self.row_min_low_water = low_water;
+            self.row_count -= dropped_rows;
+            self.unresolved -= dropped_unresolved;
         }
-        self.row_count -= dropped_rows;
-        self.unresolved -= dropped_unresolved;
         self.trim_rows_front();
         Ok(())
     }
@@ -444,15 +470,20 @@ impl<W: EdgeWeight> Peeler<W> {
         Ok(())
     }
 
-    fn preflight_variable(&self, var: VarId) -> Result<(), GraphError> {
-        self.known.check_range(var.get(), var.get())?;
-        self.waiting.check_range(var.get(), var.get())
-    }
-
-    fn ensure_variable_slots(&mut self, var: VarId) -> Result<(), GraphError> {
-        let _ = self.known.ensure(var.get())?;
-        let _ = self.waiting.ensure(var.get())?;
-        Ok(())
+    /// Make the learn path's slot, reporting whether a value is already there.
+    ///
+    /// One lookup does all three jobs the learn path used to spend three on:
+    /// range validation, the duplicate-value probe, and slot creation.
+    /// `Ring::ensure` validates the whole range before it mutates and leaves the
+    /// ring exactly as it was on error, and `known` is the only ring the learn
+    /// path grows, so "limits reject input and never evict state" holds with one
+    /// fallible call. Probing after `ensure` rather than before is
+    /// observationally identical: creating a vacant slot for an id that is
+    /// in-range and live changes nothing a caller can see, and a retired or
+    /// out-of-span id is rejected by `ensure` with exactly the `GraphError` the
+    /// separate preflight used to raise.
+    fn ensure_variable_slot(&mut self, var: VarId) -> Result<bool, GraphError> {
+        Ok(self.known.ensure(var.get())?.is_some())
     }
 
     fn preflight_check(&self, id: CheckId, edges: Edges<'_, W>) -> Result<bool, GraphError> {
@@ -483,9 +514,15 @@ impl<W: EdgeWeight> Peeler<W> {
     }
 
     fn apply_known(&mut self, var: VarId, value: Vec<u8>) {
+        // `waiting` holds a slot only for variables some live check registered
+        // against, so a variable nothing waits on costs one failed lookup —
+        // not a `mem::take` plus write-back to discover an empty list.
         let mut keys = match self.waiting.get_mut(var.get()) {
-            Lookup::Live(list) => mem::take(list),
-            Lookup::Vacant | Lookup::Retired => Vec::new(),
+            Lookup::Live(list) if !list.is_empty() => mem::take(list),
+            Lookup::Live(_) | Lookup::Vacant | Lookup::Retired => {
+                self.store_known(var, value);
+                return;
+            }
         };
         for &check in &keys {
             let transition = match self.rows.get_mut(check.get()) {
@@ -523,7 +560,10 @@ impl<W: EdgeWeight> Peeler<W> {
         } else {
             self.pool.recycle_checks(keys);
         }
+        self.store_known(var, value);
+    }
 
+    fn store_known(&mut self, var: VarId, value: Vec<u8>) {
         if let Lookup::Live(slot) = self.known.get_mut(var.get()) {
             *slot = Some(value);
             self.known_count += 1;

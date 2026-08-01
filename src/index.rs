@@ -228,6 +228,7 @@ impl<T: Default> Ring<T> {
     }
 
     /// Validate that the ring can cover an inclusive range without mutation.
+    #[inline]
     pub(crate) fn check_range(&self, first: u64, last: u64) -> Result<(), GraphError> {
         debug_assert!(first <= last, "check_range: inverted range");
         if first < self.floor {
