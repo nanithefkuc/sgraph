@@ -1,0 +1,52 @@
+[package]
+name = "sgraph"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Sparse graph: a shared sparse/Tanner-graph engine for erasure codes"
+repository = "https://github.com/nanithefkuc/sgraph"
+license = "MIT"
+readme = "README.md"
+keywords = ["ldpc", "fountain", "erasure", "tanner", "peeling"]
+categories = ["algorithms", "mathematics", "no-std"]
+exclude = ["/.github", "/.plans"]
+# Distributed via git only; depends on `fff` by git.
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Pinned by revision, not branch: this crate's neighbour generation and residual
+# solve feed downstream wire formats, so a floating dependency is a format-break
+# risk. The revision matches the one `mix-dpc` pins, so a consumer depending on
+# both resolves a single `fff` rather than two incompatible copies.
+fff = { git = "https://github.com/nanithefkuc/fff", rev = "757455773870271166666f55da5a4812b32e9c46" }
+
+[dev-dependencies]
+# Default features pull in plotters + rayon, which this harness does not use.
+criterion = { version = "0.8", default-features = false, features = [
+    "cargo_bench_support",
+] }
+
+[[bench]]
+name = "graph"
+harness = false
+
+[features]
+default = ["std", "simd"]
+# Standard library. Required for `fff`'s runtime CPU detection and its
+# process-wide backend cache.
+std = ["fff/std"]
+# Runtime-dispatched SIMD kernels; without it, portable scalar.
+simd = ["std", "fff/simd"]
+# Unstable APIs, exempt from this crate's compatibility guarantees.
+internals = []
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

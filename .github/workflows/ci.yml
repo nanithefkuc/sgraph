@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test
+      - run: cargo test --all-features
+      # Without default features the crate is no_std + alloc and fff falls back
+      # to portable scalar. Untested, that path rots.
+      - run: cargo test --no-default-features
+      - run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  cross:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [aarch64-unknown-linux-gnu, wasm32-unknown-unknown]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --target ${{ matrix.target }} --no-default-features
+
+  # Cross-execution, not cross-build. `cross` above proves the crate type-checks
+  # and links for a target; it cannot observe the property this crate actually
+  # promises, which is that a check id and its parameters expand to *the same
+  # bytes* on every peer. Nothing in a build catches a shifted draw order, a
+  # width assumption in the PRNG, or an `fff` kernel that runtime detection only
+  # selects on this architecture. The frozen vectors have to be executed there.
+  # `ubuntu-24.04-arm` is GitHub-hosted arm64, so these run natively rather than
+  # under emulation, and they exercise NEON/PMULL dispatch as a consumer gets it.
+  aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      - run: cargo test --all-features
+      - run: cargo test --no-default-features
+
+  # The other end of the range: 32-bit pointers, a different allocator, and no
+  # CPU feature detection at all. Without default features the crate is
+  # no_std + alloc, which is the floor every consumer builds on, so it runs on
+  # its own line; `--all-features` is also viable under wasip1, which does have
+  # `std`, so both are run. No test is excluded — the frozen vector and
+  # fingerprint tests in `tests/vectors.rs` and the counting-allocator proofs in
+  # `tests/zero_alloc.rs` both execute here, as do the doctests.
+  wasm:
+    runs-on: ubuntu-latest
+    env:
+      # Pinned like any other input to a determinism check.
+      WASMTIME_VERSION: 30.0.2
+      # `tests/vectors.rs` reads the fixtures at runtime through the absolute
+      # `CARGO_MANIFEST_DIR` path baked in at compile time, so the preopen maps
+      # the fixture directory onto *itself* in the guest: a renamed guest path
+      # would not resolve and the test would abort rather than be skipped.
+      CARGO_TARGET_WASM32_WASIP1_RUNNER: >-
+        wasmtime run --dir ${{ github.workspace }}/tests/data::${{ github.workspace }}/tests/data --
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Wasmtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/wasmtime"
+          curl -sSfL "https://github.com/bytecodealliance/wasmtime/releases/download/v$WASMTIME_VERSION/wasmtime-v$WASMTIME_VERSION-x86_64-linux.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP/wasmtime" --strip-components 1
+          echo "$RUNNER_TEMP/wasmtime" >> "$GITHUB_PATH"
+      - run: wasmtime --version
+      - run: cargo test --target wasm32-wasip1 --all-features
+      - run: cargo test --target wasm32-wasip1 --no-default-features
+      # `fff` compiles its `simd128` kernels in only when the target feature is
+      # enabled — Wasm has no runtime detection — so the runs above take the
+      # portable scalar path. A vectorised kernel that agreed with scalar
+      # arithmetic everywhere except on the pinned vectors would otherwise never
+      # be executed by CI.
+      - name: Test with Wasm simd128 kernels
+        run: cargo test --target wasm32-wasip1 --all-features
+        env:
+          RUSTFLAGS: -D warnings -C target-feature=+simd128
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --all-features
