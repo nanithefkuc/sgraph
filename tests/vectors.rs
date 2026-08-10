@@ -131,7 +131,7 @@ fn seeded_and_borrowed_sampling_agree() {
     }
 }
 
-/// A point-mass degree distribution must be able to draw nothing, or Phase 2's
+/// A point-mass degree distribution must be able to draw nothing, or the
 /// generators could not stay bit-compatible with the frozen offsets while
 /// composing a degree draw into the same stream.
 #[test]

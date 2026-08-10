@@ -50,4 +50,4 @@ specification — not this crate — is its authority.
   rather than opaque captured data. Copying them would create exactly the second
   oracle the point above rejects. `sgraph`'s own solver is pinned by
   independently derived cases, and `mix-dpc`'s tests remain the authority for its
-  layer — unchanged, which is the Phase 5 acceptance criterion.
+  layer — unchanged.

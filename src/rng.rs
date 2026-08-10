@@ -245,7 +245,7 @@ mod tests {
         }
     }
 
-    /// The composition that Phase 2's generators rely on: consuming a degree from
+    /// The composition the generators rely on: consuming a degree from
     /// the same stream must shift the offsets, or degree and edges would be
     /// independent streams keyed on one seed.
     #[test]

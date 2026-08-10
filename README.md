@@ -1,3 +1,8 @@
+> [!WARNING]
+> This library was made with the help of AI. While the library has tests
+to check for regressions, things may break. Audit the code yourself, or with
+your own agent before using.
+
 # sgraph
 
 **Sparse graph** — a shared sparse/Tanner-graph engine for erasure codes.
@@ -5,39 +10,53 @@
 `sgraph` is the layer that LDPC, LT, and Raptor-class implementations keep
 re-implementing: deterministic cross-peer neighbour generation, degree
 distributions, a residual sparse graph that shrinks as symbols become known,
-XOR-only peeling, and the exact residual solve that finishes what peeling cannot.
-These codes differ in how their graph is generated, not in how it is consumed.
+XOR-only peeling, and the exact residual solve that finishes what peeling
+cannot. These codes differ in how their graph is generated, not in how it is
+consumed.
 
 Field arithmetic and byte-buffer vector primitives come from
-[`fff`](https://github.com/nanithefkuc/fff); this crate never re-implements field
-arithmetic. Wire formats, packet headers, transport and HARQ policy,
+[`fff`](https://github.com/nanithefkuc/fff); this crate never re-implements
+field arithmetic. Wire formats, packet headers, transport and HARQ policy,
 belief-propagation soft-decision decoding, protograph lifting, and codec shells
 stay with the consumer.
 
-## Status
+The crate root carries `#![forbid(unsafe_code)]`, and steady state allocates
+nothing: scratch is owned and reused, and retirement recycles buffers rather
+than dropping them. `Binary` — a zero-sized GF(2) coefficient — is the
+implemented `EdgeWeight`; `ResidualCoeff<F>` embeds it into any `fff` field, so
+one generic engine serves GF(2) and GF(2^m) without taxing the binary path.
 
-Complete for the binary (GF(2)) path: deterministic sampling, the bounded
-index-keyed containers, degree distributions, the uniform/RFC-5053/
-explicit-matrix edge generators, the peeling decoder, the exact residual solve,
-and the peel → solve → re-peel fixpoint. `Binary` is the only implemented
-`EdgeWeight`; `ResidualCoeff<F>` embeds it into any `fff` field, but a non-binary
-*edge* coefficient is a declared seam rather than a working implementation.
+## Usage
 
-Not on crates.io, and not planned: it depends on `fff` by git, so depend on it the
-same way.
+The MSRV is Rust 1.89 (edition 2024).
+
+`sgraph` is distributed through git only; it is not published to
+[crates.io](https://crates.io). It depends on `fff` by git, so depend on it the
+same way. Pin the same `fff` revision across every crate you use so cargo
+resolves a single copy — the neighbour generation and residual solve feed
+downstream wire formats, so a floating dependency is a format-break risk.
 
 ```toml
 [dependencies]
 sgraph = { git = "https://github.com/nanithefkuc/sgraph" }
 ```
 
-Requires Rust 1.89 or newer (edition 2024).
+### Features
+
+| Feature | Result |
+| --- | --- |
+| `std` (default) | `fff`'s runtime CPU detection and its process-wide backend cache |
+| `simd` (default, implies `std`) | runtime-dispatched SIMD kernels from `fff` |
+| `--no-default-features` | `no_std` + `alloc`, portable scalar kernels |
+| `internals` | unstable implementation APIs, exempt from compatibility guarantees |
 
 ## Determinism
 
 A check symbol travels without its graph: both peers regenerate its edge set from
 the check's id alone. That makes the PRNG, the sampling algorithm, and the draw
-order wire properties, frozen by the fixtures under `tests/data/`.
+order wire properties, frozen by the fixtures under `tests/data/`. Changing any
+of them is a format break for every consumer — a format break gets a new or
+versioned generator, never a retuned fixture.
 
 ```rust
 use sgraph::rng::{SplitMix64, distinct_offsets, seed_for};
@@ -63,7 +82,7 @@ edge draw compose into one reproducible stream. A degree drawn from a separately
 seeded generator would leave the two independent, which is how correlated-graph
 bugs get in.
 
-## What's in the box
+## Modules
 
 | Module | Contents |
 | --- | --- |
@@ -78,52 +97,26 @@ bugs get in.
 | `id` | `VarId` and `CheckId`: `#[repr(transparent)]` newtypes so a variable horizon cannot be passed where a check key belongs. |
 | `error` | `GraphError` and `SolveError`. |
 
-## Invariants
+## Building
 
-- **Reproducibility is a wire property.** A change to the generator, the sampling
-  algorithm, or the draw order is a format break for every consumer, not a
-  refactor.
-- **A retired index is gone, not absent.** An index merely below `base` that was
-  never retired is absent, and inserting it grows the front. `Lookup` and
-  `Membership` report which of the three states an index is in; nothing is
-  evicted implicitly.
-- **Dense storage is bounded by construction.** Both containers take a maximum
-  live span and check it — along with the `u64`→`usize` conversion — on every
-  growth path. A rejection leaves the structure exactly as it was: limits reject
-  input, they never evict state to make room.
-- **Steady state allocates nothing.** Scratch is owned and reused, and retirement
-  recycles buffers rather than dropping them.
-- **No `unsafe`.** The crate root carries `#![forbid(unsafe_code)]`; every SIMD
-  kernel is upstream in `fff`, where there is one implementation to audit.
+`sgraph` builds on stable Rust (edition 2024, MSRV 1.89) with no extra tooling
+or target-feature flags — the SIMD kernels it uses from `fff` are selected at
+runtime:
 
-## Feature flags
+```sh
+cargo build                        # default: std + simd
+cargo build --no-default-features  # portable no_std + alloc
+cargo test --all-features
+```
 
-- `std` (default) — enables `fff`'s runtime CPU detection and its process-wide
-  backend cache. Without it the crate is `no_std` + `alloc`.
-- `simd` (default, implies `std`) — runtime-dispatched SIMD kernels from `fff`.
-- `internals` — unstable implementation APIs, exempt from compatibility
-  guarantees.
+## Benchmarks
 
-## Determinism and version policy
-
-- **The generator is the format.** The PRNG, the sampling algorithm, the draw
-  order, and the domain-separation input are all observable to a peer that
-  regenerates an edge set from a check id. Changing any of them is a format
-  break, and a format break gets a new or versioned generator — never a
-  retuned fixture.
-- **`fff` is pinned by revision, not by branch.** A consumer that depends on both
-  `sgraph` and `fff` should pin the same revision so cargo resolves one copy.
-- **Public surface is everything outside `internals`.** Items behind the
-  `internals` feature are exempt from compatibility guarantees.
-- **Field arithmetic is not a wire property here.** `sgraph` carries packed bytes
-  and calls `fff`; swapping `fff` kernels changes speed, not results.
-
-## Measured throughput
-
-Numbers are the minimum of three runs pinned to one core, on an Intel Core
-Ultra 7 258V under Linux 7.1 with `rustc 1.93.0`, `--all-features`,
-`lto = "thin"`, and 1024-byte symbols. They describe this machine and this
-geometry; re-measure before quoting them anywhere else.
+`cargo bench --bench graph` covers neighbour generation, ingest, cascade, and
+residual solve. The numbers below are the minimum of three runs pinned to one
+core, on an Intel Core Ultra 7 258V under Linux 7.1 with `rustc 1.93.0`,
+`--all-features`, `lto = "thin"`, and 1024-byte symbols. They describe this
+machine and this geometry; re-measure before quoting them anywhere else, and
+compare only interleaved, core-pinned runs of the two builds.
 
 | Case | Geometry | Per operation |
 | --- | --- | --- |
@@ -131,35 +124,6 @@ geometry; re-measure before quoting them anywhere else.
 | `Peeler::push_check` (no ripple) | degree 3 / 8 / 32, 64 live rows | 138 ns / 179 ns / 436 ns per check |
 | Peeling cascade | chain of 16 / 256 hops | 1.18 µs / 22.5 µs per chain |
 | Residual RREF over GF(256) | 8×8 / 32×32 / 64×64 | 1.22 µs / 18.9 µs / 84.7 µs per solve |
-
-Criterion baseline artifacts are machine-specific and are deliberately not
-committed; record the comparison conditions and results instead.
-
-## Development
-
-```sh
-cargo test --all-features
-cargo test --no-default-features
-cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -D warnings
-RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
-```
-
-`tests/vectors.rs` pins the deterministic machinery against values captured from
-an independent implementation. A change that moves it is a format break, not a
-refactor.
-
-Benchmarks cover neighbour generation, ingest, cascade, and residual solve:
-
-```sh
-cargo bench --bench graph -- --save-baseline before
-# ... change something ...
-cargo bench --bench graph -- --baseline before
-```
-
-Compare only interleaved, core-pinned runs of the two builds. On a laptop the
-run-to-run drift between two *identical* builds reaches tens of percent, which is
-larger than most changes worth measuring.
 
 ## License
 
