@@ -256,6 +256,17 @@ impl<T: Default> Ring<T> {
     /// [`GraphError::IndexNotRepresentable`] when the span does not fit `usize`.
     /// On any error the ring is unchanged.
     pub fn ensure(&mut self, index: u64) -> Result<&mut T, GraphError> {
+        // Monotone streams append almost every slot. Avoid recomputing the
+        // existing range and checked span on that hot path; `len < limit`
+        // proves the one-slot extension remains in bounds.
+        if !self.items.is_empty()
+            && self.items.len() < self.limit.get()
+            && self.last().and_then(|last| last.checked_add(1)) == Some(index)
+        {
+            self.items.push_back(T::default());
+            let last = self.items.len() - 1;
+            return Ok(&mut self.items[last]);
+        }
         self.check_range(index, index)?;
 
         if self.items.is_empty() {

@@ -217,6 +217,15 @@ impl<W: EdgeWeight> NeighborBuf<W> {
     pub fn edges(&self) -> Result<Edges<'_, W>, GraphError> {
         Edges::new(&self.support, &self.weights)
     }
+
+    #[inline]
+    pub(crate) fn generated_edges(&self) -> Edges<'_, W> {
+        debug_assert!(Edges::new(&self.support, &self.weights).is_ok());
+        Edges {
+            support: &self.support,
+            weights: &self.weights,
+        }
+    }
 }
 
 /// A validated view of one check's edges.
