@@ -138,6 +138,13 @@ impl<W: EdgeWeight> Peeler<W> {
         })
     }
 
+    /// Whether peeling has queued at least one undrained recovery.
+    #[inline]
+    #[must_use]
+    pub fn has_recovered(&self) -> bool {
+        !self.recovered.is_empty()
+    }
+
     /// Drain variables recovered by peeling, retaining peeler allocation.
     pub fn drain_recovered(&mut self) -> impl Iterator<Item = VarId> + '_ {
         self.recovered.drain(..)
@@ -239,12 +246,12 @@ impl<W: EdgeWeight> Peeler<W> {
         if duplicate {
             return Ok(());
         }
-
-        let row_slot = self.rows.ensure(id.get())?;
-        debug_assert!(matches!(row_slot, RowSlot::Vacant));
-        for &var in edges.support() {
-            let _ = self.known.ensure(var.get())?;
-        }
+        // Dense rings only need their support endpoints materialized; every
+        // interior variable slot is created by the same growth.
+        let min_var = edges.min_var();
+        let max_var = edges.support().iter().copied().max().unwrap_or(min_var);
+        let _ = self.known.ensure(min_var.get())?;
+        let _ = self.known.ensure(max_var.get())?;
 
         let mut reduced = self.pool.take_symbol_copy(rhs);
         let mut support = self.pool.take_support();
@@ -322,10 +329,7 @@ impl<W: EdgeWeight> Peeler<W> {
     ) -> Result<(), GraphError> {
         let mut scratch = mem::take(&mut self.neighbor_buf);
         let result = match generator.neighbors(id, &mut scratch) {
-            Ok(()) => match scratch.edges() {
-                Ok(edges) => self.push_check(id, edges, rhs),
-                Err(error) => Err(error),
-            },
+            Ok(()) => self.push_check(id, scratch.generated_edges(), rhs),
             Err(error) => Err(error),
         };
         self.neighbor_buf = scratch;

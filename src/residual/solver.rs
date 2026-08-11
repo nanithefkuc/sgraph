@@ -102,7 +102,7 @@ impl<F: FieldKernels> Solver<F> {
         } else {
             self.solve_ple(system)?
         };
-        self.finish_report(system, rank)
+        Ok(self.finish_report(system, rank))
     }
 
     fn solve_echelon(&mut self, system: &System<'_, F>) -> Result<usize, SolveError> {
@@ -220,16 +220,16 @@ impl<F: FieldKernels> Solver<F> {
         self.symbol_len = system.symbol_len;
     }
 
-    fn finish_report(&mut self, system: &System<'_, F>, rank: usize) -> Result<Report, SolveError> {
+    fn finish_report(&mut self, system: &System<'_, F>, rank: usize) -> Report {
         for (column, &var) in system.columns.iter().enumerate() {
             if !self.determined[column] {
                 self.undetermined.push(var);
             }
         }
-        Ok(Report {
+        Report {
             rank,
             deficiency: system.columns.len() - rank,
-        })
+        }
     }
 
     fn ensure_capacity(
