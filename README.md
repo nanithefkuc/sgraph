@@ -15,8 +15,9 @@ cannot. These codes differ in how their graph is generated, not in how it is
 consumed.
 
 Field arithmetic and byte-buffer vector primitives come from
-[`fgf`](https://github.com/nanithefkuc/fgf); this crate never re-implements
-field arithmetic. Wire formats, packet headers, transport and HARQ policy,
+[`fgf`](https://github.com/nanithefkuc/fgf), while
+[`gfm`](https://github.com/nanithefkuc/gfm) owns the elimination engine used by
+the residual solver. Wire formats, packet headers, transport and HARQ policy,
 belief-propagation soft-decision decoding, protograph lifting, and codec shells
 stay with the consumer.
 
@@ -31,10 +32,10 @@ one generic engine serves GF(2) and GF(2^m) without taxing the binary path.
 The MSRV is Rust 1.89 (edition 2024).
 
 `sgraph` is distributed through git only; it is not published to
-[crates.io](https://crates.io). It depends on `fgf` by git, so depend on it the
-same way. Pin the same `fgf` revision across every crate you use so cargo
-resolves a single copy — the neighbour generation and residual solve feed
-downstream wire formats, so a floating dependency is a format-break risk.
+[crates.io](https://crates.io). It depends on `fgf` and `gfm` by git, so depend
+on it the same way. Pin the same revisions across every crate you use so cargo
+resolves one copy — neighbour generation and residual solving feed downstream
+wire formats, so floating dependencies are a format-break risk.
 
 ```toml
 [dependencies]
@@ -45,8 +46,8 @@ sgraph = { git = "https://github.com/nanithefkuc/sgraph" }
 
 | Feature | Result |
 | --- | --- |
-| `std` (default) | `fgf`'s runtime CPU detection and its process-wide backend cache |
-| `simd` (default, implies `std`) | runtime-dispatched SIMD kernels from `fgf` |
+| `std` (default) | runtime CPU detection and process-wide backend caches in `fgf` and `gfm` |
+| `simd` (default, implies `std`) | runtime-dispatched `fgf` kernels used directly and through `gfm` |
 | `--no-default-features` | `no_std` + `alloc`, portable scalar kernels |
 | `internals` | unstable implementation APIs, exempt from compatibility guarantees |
 
@@ -92,7 +93,7 @@ bugs get in.
 | `degree` | `DegreeDistribution` with `Constant` (a point mass that consumes no randomness), `Cumulative` (an explicit integer weight table), and `RobustSoliton` (built from Q32 fixed-point parameters, so the table is identical on every platform). |
 | `neighbors` | `NeighborGen` with the `Uniform`, `WindowedUniform`, `Rfc5053Triple` (RFC 5053 Raptor, not RaptorQ) and `ExplicitMatrix` (CSR parity-check) generators, the reusable `NeighborBuf` scratch, and `Edges` — the one place edge shape is validated. |
 | `peel` | `Peeler`: the residual sparse graph, reverse adjacency, iterative degree-one cascade, pooled buffers, and explicit retirement. `StalledRow` exposes what peeling could not finish. |
-| `residual` | `ResidualBuilder`/`RowSink` single-pass assembly over explicit columns, and `Solver` — full reduced row echelon form over any `fgf` field. |
+| `residual` | `ResidualBuilder`/`RowSink` single-pass assembly over explicit columns, and a reusable `Solver` delegating elimination to `gfm`. |
 | `driver` | `DenseRows`, the consumer seam for progressively reduced dense equations, and `Resolver`, the peel → solve → re-peel fixpoint. |
 | `id` | `VarId` and `CheckId`: `#[repr(transparent)]` newtypes so a variable horizon cannot be passed where a check key belongs. |
 | `error` | `GraphError` and `SolveError`. |

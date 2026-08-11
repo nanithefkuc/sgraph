@@ -42,8 +42,8 @@ peeling cannot. Complete for the binary (GF(2)) path.
   adjacency, the iterative degree-one cascade, pooled buffers, explicit
   retirement, and `StalledRow` exposing what peeling could not finish.
 - **Residual solve** (`residual`): `ResidualBuilder`/`RowSink` single-pass
-  assembly over explicit columns and `Solver`, full reduced row echelon form over
-  any `fgf` field.
+  assembly over explicit columns and a reusable `Solver` delegating elimination
+  and per-column determinedness to `gfm`.
 - **Fixpoint driver** (`driver`): `DenseRows`, the consumer seam for
   progressively reduced dense equations, and `Resolver`, the peel → solve →
   re-peel fixpoint.
@@ -63,3 +63,6 @@ peeling cannot. Complete for the binary (GF(2)) path.
 
 - Removed the extraction regressions from the consumer hot paths so peeling
   ingest, cascade, and residual solve allocate nothing in steady state.
+- Replaced the private elimination loop with the rev-pinned `gfm` accumulator,
+  preserving exact rank, inconsistency, partial-recovery, and allocation
+  contracts.

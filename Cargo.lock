@@ -192,6 +192,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "gfm"
+version = "0.0.0"
+source = "git+https://github.com/nanithefkuc/gfm?rev=7d269bfc0f4569c0d334526fdd8887eb16af066c#7d269bfc0f4569c0d334526fdd8887eb16af066c"
+dependencies = [
+ "fgf",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -365,6 +373,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "fgf",
+ "gfm",
 ]
 
 [[package]]

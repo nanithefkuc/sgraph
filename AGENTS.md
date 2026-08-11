@@ -6,9 +6,10 @@ expensive to rediscover; violating one is a bug even when the tests pass.
 ## Scope
 
 `sgraph` is a sparse-graph engine, not a codec. Field arithmetic and byte-buffer
-vector primitives come from `fgf` — never re-implement them here. Wire formats,
-packet headers, transport and HARQ policy, belief-propagation soft-decision
-decoding, protograph lifting, and codec shells belong to consumers.
+vector primitives come from `fgf`, and elimination comes from `gfm` — never
+re-implement them here. Wire formats, packet headers, transport and HARQ policy,
+belief-propagation soft-decision decoding, protograph lifting, and codec shells
+belong to consumers.
 
 Vocabulary is graph-theoretic: variable/check, not source/repair. This crate
 serves LDPC — where a check is a parity constraint and not a transmitted symbol —
@@ -70,11 +71,10 @@ as much as it serves LT and Raptor.
 - For every live check row, `rhs` equals the field sum of the true values of the
   variables still in its support. Known neighbours are folded out at ingest and
   dropped; the resident structure is the residual graph.
-- `deficiency == |unknowns| − rank`, computed as a pivot count. Exact, not a
-  heuristic.
-- The solver reaches fully **reduced** row echelon form. The per-column
-  determinedness test is a single-nonzero-in-row check and is valid only under
-  full reduction — stopping at echelon form breaks it silently.
+- `deficiency == |unknowns| − rank`, reported by `gfm` as a pivot count. Exact,
+  not a heuristic.
+- `gfm` owns elimination and full-reduction semantics. The adapter preserves its
+  per-column determinedness result; do not add another elimination loop here.
 - Residual columns are the consumer's complete, sorted `IndexSet` snapshot. Never
   infer them from sparse support: a missing variable can occur only in a dense
   row or no received row yet.
@@ -185,7 +185,7 @@ src/
   neighbors/triple.rs    Rfc5053Triple (RFC 5053 Raptor only)
   neighbors/explicit.rs  ExplicitMatrix, a validated CSR parity-check matrix
   peel/              residual rows, Peeler, retirement, and buffer pools
-  residual/          Row, DenseRow, single-pass builder, and RREF Solver
+  residual/          graph-owned rows/building and a gfm-backed Solver
   driver.rs          DenseRows consumer seam and fixpoint Resolver
 tests/
   vectors.rs         asserts the frozen fixtures

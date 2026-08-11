@@ -21,6 +21,9 @@ path = "src/lib.rs"
 # solve feed downstream wire formats, so a floating dependency is a format-break
 # risk. Consumers should pin this revision so cargo resolves one `fgf` copy.
 fgf = { git = "https://github.com/nanithefkuc/fgf", rev = "d0e331cec2e6ae5645e529597fa913db467a44cd" }
+# Linear algebra belongs to gfm; sgraph supplies graph-owned row assembly and
+# delegates elimination through its rev-pinned public API.
+gfm = { git = "https://github.com/nanithefkuc/gfm", rev = "7d269bfc0f4569c0d334526fdd8887eb16af066c" }
 
 [dev-dependencies]
 # Default features pull in plotters + rayon, which this harness does not use.
@@ -34,11 +37,10 @@ harness = false
 
 [features]
 default = ["std", "simd"]
-# Standard library. Required for `fgf`'s runtime CPU detection and its
-# process-wide backend cache.
-std = ["fgf/std"]
+# Standard library. Required for runtime CPU detection and process-wide caches.
+std = ["fgf/std", "gfm/std"]
 # Runtime-dispatched SIMD kernels; without it, portable scalar.
-simd = ["std", "fgf/simd"]
+simd = ["std", "fgf/simd", "gfm/simd"]
 # Unstable APIs, exempt from this crate's compatibility guarantees.
 internals = []
 
