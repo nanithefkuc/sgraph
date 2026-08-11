@@ -7,7 +7,7 @@ use crate::{
 use alloc::vec;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
-use fff::{Gf8, Gf16, gf8};
+use fgf::{Gf8, Gf16, gf8};
 
 fn config() -> PoolConfig {
     let span = NonZeroUsize::new(128).unwrap();
@@ -25,7 +25,7 @@ fn unknowns(ids: &[u64]) -> IndexSet {
 fn rhs(terms: &[(gf8::Elem, &[u8])], len: usize) -> Vec<u8> {
     let mut out = vec![0; len];
     for &(coefficient, value) in terms {
-        fff::ops::mul_add::<Gf8>(&mut out, coefficient, value);
+        fgf::ops::mul_add::<Gf8>(&mut out, coefficient, value);
     }
     out
 }
@@ -295,7 +295,7 @@ fn dense_row_folds_each_known_term_once() {
     assert_eq!(row.terms(), terms_after_first);
 
     let mut expected = after_first;
-    fff::ops::mul_add::<Gf8>(&mut expected, coefficients[1], &values[1]);
+    fgf::ops::mul_add::<Gf8>(&mut expected, coefficients[1], &values[1]);
     peeler.learn_copy(ids[1], &values[1]).unwrap();
     row.reduce_known(&peeler).unwrap();
     assert_eq!(row.rhs(), expected);
@@ -419,7 +419,7 @@ fn duplicate_terms_combine_and_input_geometry_is_exact() {
     let mut wide_builder = ResidualBuilder::<Gf16>::new();
     let error = {
         let mut sink = wide_builder.begin(&column);
-        sink.push_dense([(column[0], fff::gf16::Elem::ONE)], &[1]);
+        sink.push_dense([(column[0], fgf::gf16::Elem::ONE)], &[1]);
         sink.finish().unwrap_err()
     };
     assert_eq!(

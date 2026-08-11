@@ -6,7 +6,7 @@ expensive to rediscover; violating one is a bug even when the tests pass.
 ## Scope
 
 `sgraph` is a sparse-graph engine, not a codec. Field arithmetic and byte-buffer
-vector primitives come from `fff` — never re-implement them here. Wire formats,
+vector primitives come from `fgf` — never re-implement them here. Wire formats,
 packet headers, transport and HARQ policy, belief-propagation soft-decision
 decoding, protograph lifting, and codec shells belong to consumers.
 
@@ -87,11 +87,11 @@ as much as it serves LT and Raptor.
 
 - Do not write `unsafe` SIMD in this crate. There is one implementation to audit
   and it is upstream. The crate root carries `#![forbid(unsafe_code)]`.
-- Call `fff::ops` directly through `EdgeWeight`. Do not add a wrapper module that
+- Call `fgf::ops` directly through `EdgeWeight`. Do not add a wrapper module that
   renames `add_assign`/`mul_add`/`mul_assign` — one convention only.
-- `fff::ops` panics on geometry violations. Validate at the public boundary and
+- `fgf::ops` panics on geometry violations. Validate at the public boundary and
   `debug_assert` internally so a caller never reaches a panicking kernel.
-- GF(2) XOR is `fff::ops::add_assign::<Gf8>`: `fff` has no `Gf2`, and XOR of a
+- GF(2) XOR is `fgf::ops::add_assign::<Gf8>`: `fgf` has no `Gf2`, and XOR of a
   packed element array is XOR of bytes for any field. `Gf8` is an arbitrary
   witness; say so at the call site.
 
@@ -166,7 +166,7 @@ as much as it serves LT and Raptor.
   scratch. Generators MUST take their scratch from it rather than allocating a
   temporary, or steady-state generation stops being allocation-free.
 - `EdgeWeight::ELEMENT_BYTES` is what lets a symbol length be validated for
-  packed-element alignment once, before any `fff` kernel can reach its panicking
+  packed-element alignment once, before any `fgf` kernel can reach its panicking
   geometry check.
 
 ## Layout

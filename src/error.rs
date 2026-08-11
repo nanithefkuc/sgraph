@@ -1,6 +1,6 @@
 //! Crate error types.
 //!
-//! Fallibility lives at the public boundary. `fff`'s kernels panic on geometry
+//! Fallibility lives at the public boundary. `fgf`'s kernels panic on geometry
 //! violations, so every value this crate hands them is validated first; internal
 //! call sites carry `debug_assert`s rather than repeated checks.
 //!

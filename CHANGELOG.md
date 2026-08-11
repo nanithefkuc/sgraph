@@ -43,7 +43,7 @@ peeling cannot. Complete for the binary (GF(2)) path.
   retirement, and `StalledRow` exposing what peeling could not finish.
 - **Residual solve** (`residual`): `ResidualBuilder`/`RowSink` single-pass
   assembly over explicit columns and `Solver`, full reduced row echelon form over
-  any `fff` field.
+  any `fgf` field.
 - **Fixpoint driver** (`driver`): `DenseRows`, the consumer seam for
   progressively reduced dense equations, and `Resolver`, the peel → solve →
   re-peel fixpoint.

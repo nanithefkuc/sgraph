@@ -7,7 +7,7 @@
 //! deliberately not committed; record the comparison conditions instead.
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use fff::{Gf8, gf8};
+use fgf::{Gf8, gf8};
 use sgraph::{
     Binary, CheckId, Constant, Edges, NeighborBuf, NeighborGen, Peeler, PoolConfig,
     ResidualBuilder, Solver, VarId, WindowedUniform,

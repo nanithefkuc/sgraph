@@ -23,7 +23,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test
       - run: cargo test --all-features
-      # Without default features the crate is no_std + alloc and fff falls back
+      # Without default features the crate is no_std + alloc and fgf falls back
       # to portable scalar. Untested, that path rots.
       - run: cargo test --no-default-features
       - run: cargo doc --all-features --no-deps
@@ -47,7 +47,7 @@ jobs:
   # and links for a target; it cannot observe the property this crate actually
   # promises, which is that a check id and its parameters expand to *the same
   # bytes* on every peer. Nothing in a build catches a shifted draw order, a
-  # width assumption in the PRNG, or an `fff` kernel that runtime detection only
+  # width assumption in the PRNG, or an `fgf` kernel that runtime detection only
   # selects on this architecture. The frozen vectors have to be executed there.
   # `ubuntu-24.04-arm` is GitHub-hosted arm64, so these run natively rather than
   # under emulation, and they exercise NEON/PMULL dispatch as a consumer gets it.
@@ -94,7 +94,7 @@ jobs:
       - run: wasmtime --version
       - run: cargo test --target wasm32-wasip1 --all-features
       - run: cargo test --target wasm32-wasip1 --no-default-features
-      # `fff` compiles its `simd128` kernels in only when the target feature is
+      # `fgf` compiles its `simd128` kernels in only when the target feature is
       # enabled — Wasm has no runtime detection — so the runs above take the
       # portable scalar path. A vectorised kernel that agreed with scalar
       # arithmetic everywhere except on the pinned vectors would otherwise never

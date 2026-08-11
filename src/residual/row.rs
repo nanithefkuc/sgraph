@@ -3,8 +3,8 @@
 use crate::{EdgeWeight, Peeler, SolveError, VarId, VariableState};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use fff::FieldKernels;
-use fff::field::Elem;
+use fgf::FieldKernels;
+use fgf::field::Elem;
 
 /// One borrowed residual equation over `F`.
 #[derive(Debug, Clone, Copy)]
@@ -114,7 +114,7 @@ impl<F: FieldKernels> DenseRow<F> {
                 index += 1;
                 continue;
             };
-            fff::ops::mul_add::<F>(&mut self.rhs, coefficient, value);
+            fgf::ops::mul_add::<F>(&mut self.rhs, coefficient, value);
             self.terms.swap_remove(index);
         }
         Ok(())

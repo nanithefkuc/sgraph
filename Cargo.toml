@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["ldpc", "fountain", "erasure", "tanner", "peeling"]
 categories = ["algorithms", "mathematics", "no-std"]
 exclude = ["/.github", "/.plans"]
-# Distributed via git only; depends on `fff` by git.
+# Distributed via git only; depends on `fgf` by git.
 publish = false
 
 [lib]
@@ -19,9 +19,8 @@ path = "src/lib.rs"
 [dependencies]
 # Pinned by revision, not branch: this crate's neighbour generation and residual
 # solve feed downstream wire formats, so a floating dependency is a format-break
-# risk. The revision matches the one `mix-dpc` pins, so a consumer depending on
-# both resolves a single `fff` rather than two incompatible copies.
-fff = { git = "https://github.com/nanithefkuc/fff", rev = "757455773870271166666f55da5a4812b32e9c46" }
+# risk. Consumers should pin this revision so cargo resolves one `fgf` copy.
+fgf = { git = "https://github.com/nanithefkuc/fgf", rev = "d0e331cec2e6ae5645e529597fa913db467a44cd" }
 
 [dev-dependencies]
 # Default features pull in plotters + rayon, which this harness does not use.
@@ -35,11 +34,11 @@ harness = false
 
 [features]
 default = ["std", "simd"]
-# Standard library. Required for `fff`'s runtime CPU detection and its
+# Standard library. Required for `fgf`'s runtime CPU detection and its
 # process-wide backend cache.
-std = ["fff/std"]
+std = ["fgf/std"]
 # Runtime-dispatched SIMD kernels; without it, portable scalar.
-simd = ["std", "fff/simd"]
+simd = ["std", "fgf/simd"]
 # Unstable APIs, exempt from this crate's compatibility guarantees.
 internals = []
 

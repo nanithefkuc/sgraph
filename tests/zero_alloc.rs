@@ -14,7 +14,7 @@
 //!   sequence. Splitting them would let each contaminate the others' counts.
 
 use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-use fff::{Gf8, gf8};
+use fgf::{Gf8, gf8};
 use sgraph::index::IndexSet;
 use sgraph::{
     Binary, CheckId, DenseRows, Edges, Peeler, PoolConfig, ResidualBuilder, Resolver, RowSink,
@@ -269,7 +269,7 @@ impl DenseRows<Gf8> for FixedDense {
                     term += 1;
                     continue;
                 };
-                fff::ops::mul_add::<Gf8>(&mut self.rhs[row], coefficient, value);
+                fgf::ops::mul_add::<Gf8>(&mut self.rhs[row], coefficient, value);
                 self.lengths[row] -= 1;
                 self.terms[row].swap(term, self.lengths[row]);
             }

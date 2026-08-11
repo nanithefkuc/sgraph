@@ -13,10 +13,10 @@
 //! `push`, `swap_remove`, and indexing all compile away. No specialization, no
 //! `const IS_BINARY` branching in the hot loop, no second engine to drift.
 //!
-//! Field arithmetic is always `fff`'s. Nothing here implements a field loop.
+//! Field arithmetic is always `fgf`'s. Nothing here implements a field loop.
 
-use fff::field::Elem;
-use fff::{FieldKernels, Gf8};
+use fgf::field::Elem;
+use fgf::{FieldKernels, Gf8};
 
 /// One edge's coefficient.
 ///
@@ -26,7 +26,7 @@ use fff::{FieldKernels, Gf8};
 pub trait EdgeWeight: Copy + Eq + Default + core::fmt::Debug + 'static {
     /// Width in bytes of one packed field element.
     ///
-    /// A symbol is a packed array of elements, and `fff`'s kernels panic on a
+    /// A symbol is a packed array of elements, and `fgf`'s kernels panic on a
     /// partial trailing element. The peeler validates symbol length against this
     /// once at construction so no caller can reach that panic.
     const ELEMENT_BYTES: usize;
@@ -89,9 +89,9 @@ impl EdgeWeight for Binary {
     fn mul_add(dst: &mut [u8], _w: Self, src: &[u8]) {
         debug_assert_eq!(dst.len(), src.len(), "mul_add: length mismatch");
         // Addition in any GF(2^m) is XOR of the packed bytes, so this kernel is
-        // field-independent; `fff` has no `Gf2`, and `Gf8` is an arbitrary
+        // field-independent; `fgf` has no `Gf2`, and `Gf8` is an arbitrary
         // witness type that selects the same byte-wise routine.
-        fff::ops::add_assign::<Gf8>(dst, src);
+        fgf::ops::add_assign::<Gf8>(dst, src);
     }
 
     /// The inverse of one is one.
@@ -112,7 +112,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::mem::size_of;
-    use fff::{Gf16, gf8, gf16};
+    use fgf::{Gf16, gf8, gf16};
 
     #[test]
     fn binary_is_zero_sized() {

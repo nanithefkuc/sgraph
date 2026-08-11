@@ -6,12 +6,12 @@
 //! finishes what peeling cannot. LDPC, LT, and Raptor-class codes differ in how
 //! their graph is generated, not in how it is consumed.
 //!
-//! Field arithmetic and byte-buffer vector primitives come from [`fff`]; this
+//! Field arithmetic and byte-buffer vector primitives come from [`fgf`]; this
 //! crate never re-implements field arithmetic. Wire formats, packet headers,
 //! transport and HARQ policy, belief-propagation soft-decision decoding,
 //! protograph lifting, and codec shells stay with the consumer.
 //!
-//! [`fff`]: https://github.com/nanithefkuc/fff
+//! [`fgf`]: https://github.com/nanithefkuc/fgf
 //!
 //! ## Layout
 //! * [`rng`] and [`neighbors`] regenerate deterministic edge sets from check ids.
@@ -51,10 +51,10 @@
 //!
 //! ## Feature flags
 //!
-//! * `std` (default) — enables `fff`'s runtime CPU detection and its
+//! * `std` (default) — enables `fgf`'s runtime CPU detection and its
 //!   process-wide backend cache. Without it the crate is `no_std` + `alloc`.
 //! * `simd` (default, implies `std`) — runtime-dispatched SIMD kernels from
-//!   `fff`. Without it, portable scalar.
+//!   `fgf`. Without it, portable scalar.
 //! * `internals` — exposes unstable implementation APIs. Nothing behind it is
 //!   covered by this crate's compatibility guarantees.
 

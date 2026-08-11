@@ -6,7 +6,7 @@ use crate::{
     Solver, VarId,
 };
 use alloc::vec::Vec;
-use fff::FieldKernels;
+use fgf::FieldKernels;
 
 /// Consumer seam for progressively reduced, selectively admitted dense rows.
 pub trait DenseRows<F: FieldKernels> {

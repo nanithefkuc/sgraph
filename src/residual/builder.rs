@@ -4,14 +4,14 @@ use super::row::{Row, validate_rhs};
 use crate::{ResidualCoeff, SolveError, StalledRow, VarId};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use fff::FieldKernels;
-use fff::field::Elem;
+use fgf::FieldKernels;
+use fgf::field::Elem;
 
 /// Reusable single-pass residual-system builder.
 ///
 /// `coefficients` is a **packed** row-major matrix — `columns * F::BYTES` bytes
 /// per row, the same encoding as the symbol matrix — so the solver can drive a
-/// coefficient row through `fff::ops` instead of a scalar per-element loop.
+/// coefficient row through `fgf::ops` instead of a scalar per-element loop.
 /// `term_row` stays element-typed because assembling a row means adding
 /// duplicate terms in the field.
 #[derive(Debug)]
@@ -176,7 +176,7 @@ impl<'a, F: FieldKernels> RowSink<'a, F> {
         self.builder
             .coefficients
             .resize(start + columns * F::BYTES, 0);
-        fff::ops::pack::<F>(
+        fgf::ops::pack::<F>(
             &mut self.builder.coefficients[start..],
             &self.builder.term_row,
         );
@@ -243,7 +243,7 @@ pub(super) fn geometry_error<F: FieldKernels>(
 #[cfg(test)]
 mod tests {
     use super::checked_geometry;
-    use fff::{Gf8, Gf16};
+    use fgf::{Gf8, Gf16};
 
     #[test]
     fn every_matrix_product_is_checked() {

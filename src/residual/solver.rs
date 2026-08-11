@@ -4,8 +4,8 @@ use super::builder::{System, checked_geometry, geometry_error};
 use crate::{SolveError, VarId};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use fff::FieldKernels;
-use fff::field::Elem;
+use fgf::FieldKernels;
+use fgf::field::Elem;
 
 /// Rank and exact residual deficiency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -16,11 +16,11 @@ pub struct Report {
     pub deficiency: usize,
 }
 
-/// Reusable RREF solver over one `fff` field.
+/// Reusable RREF solver over one `fgf` field.
 ///
 /// The coefficient matrix is stored **packed**, exactly like the symbol matrix:
 /// `columns * F::BYTES` bytes per row. That is what lets a row operation go
-/// through `fff::ops` instead of a scalar per-element loop — at wide geometries
+/// through `fgf::ops` instead of a scalar per-element loop — at wide geometries
 /// the coefficient side is the same order of work as the symbol side, and a
 /// scalar loop there costs more than the entire symbol reduction.
 #[derive(Debug)]
@@ -114,7 +114,7 @@ impl<F: FieldKernels> Solver<F> {
         })
     }
     fn reduce_to_rref(&mut self, rows: usize, columns: usize) -> usize {
-        // Every `fff` field is a binary extension field, so subtraction is
+        // Every `fgf` field is a binary extension field, so subtraction is
         // addition and one `mul_add` expresses `row -= factor * pivot` exactly.
         // The whole vectorised elimination below rests on that.
         debug_assert!(F::Elem::ONE.sub(F::Elem::ONE).is_zero());
@@ -146,11 +146,11 @@ impl<F: FieldKernels> Solver<F> {
                 let inverse = pivot.inv();
                 let row = &mut self.coefficients[pivot_row * stride..][..stride];
                 if wide {
-                    fff::ops::mul_assign::<F>(row, inverse);
+                    fgf::ops::mul_assign::<F>(row, inverse);
                 } else {
                     scale_row::<F>(row, inverse);
                 }
-                fff::ops::mul_assign::<F>(
+                fgf::ops::mul_assign::<F>(
                     &mut self.symbols[pivot_row * self.symbol_len..][..self.symbol_len],
                     inverse,
                 );
@@ -186,12 +186,12 @@ impl<F: FieldKernels> Solver<F> {
                     // One prepared coefficient drives both halves of the row
                     // operation, so the backend resolves `factor` once rather
                     // than once per buffer.
-                    let factor = fff::ops::Coeff::<F>::new(factor);
-                    fff::ops::mul_add_with::<F>(coefficient_row, &factor, pivot_coefficients);
-                    fff::ops::mul_add_with::<F>(symbol_row, &factor, pivot_symbol);
+                    let factor = fgf::ops::Coeff::<F>::new(factor);
+                    fgf::ops::mul_add_with::<F>(coefficient_row, &factor, pivot_coefficients);
+                    fgf::ops::mul_add_with::<F>(symbol_row, &factor, pivot_symbol);
                 } else {
                     fused_row::<F>(coefficient_row, pivot_coefficients, factor);
-                    fff::ops::mul_add::<F>(symbol_row, factor, pivot_symbol);
+                    fgf::ops::mul_add::<F>(symbol_row, factor, pivot_symbol);
                 }
             }
 
@@ -260,8 +260,8 @@ fn elems<F: FieldKernels>(row: &[u8]) -> impl Iterator<Item = F::Elem> + '_ {
 /// Whether every coefficient in a packed row is zero.
 ///
 /// This reads elements rather than testing the bytes directly: an all-zero byte
-/// encoding of the field's zero is a property of every field `fff` ships today,
-/// but it is not part of the `fff` field contract, and the cost of honouring
+/// encoding of the field's zero is a property of every field `fgf` ships today,
+/// but it is not part of the `fgf` field contract, and the cost of honouring
 /// the contract here is nil.
 fn row_is_zero<F: FieldKernels>(row: &[u8]) -> bool {
     elems::<F>(row).all(Elem::is_zero)
