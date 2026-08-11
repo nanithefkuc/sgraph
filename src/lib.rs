@@ -2,24 +2,26 @@
 //!
 //! The sparse/Tanner-graph engine that erasure-coding families keep
 //! re-implementing: deterministic neighbour generation, degree distributions,
-//! a residual sparse graph, XOR-only peeling, and the exact residual solve that
-//! finishes what peeling cannot. LDPC, LT, and Raptor-class codes differ in how
-//! their graph is generated, not in how it is consumed.
+//! a residual sparse graph, binary and field-weighted peeling, and the exact
+//! residual solve that finishes what peeling cannot. LDPC, LT, and Raptor-class
+//! codes differ in how their graph is generated, not in how it is consumed.
 //!
-//! Field arithmetic and byte-buffer vector primitives come from [`fgf`]; this
-//! crate never re-implements field arithmetic. Wire formats, packet headers,
-//! transport and HARQ policy, belief-propagation soft-decision decoding,
+//! Field arithmetic and byte-buffer vector primitives come from [`fgf`];
+//! elimination comes from [`gfm`]. This crate owns graph topology and row
+//! assembly, not either lower-level mathematical object. Wire formats, packet
+//! headers, transport and HARQ policy, belief-propagation soft-decision decoding,
 //! protograph lifting, and codec shells stay with the consumer.
 //!
 //! [`fgf`]: https://github.com/nanithefkuc/fgf
+//! [`gfm`]: https://github.com/nanithefkuc/gfm
 //!
 //! ## Layout
 //! * [`rng`] and [`neighbors`] regenerate deterministic edge sets from check ids.
 //! * [`degree`] supplies check-degree distributions.
 //! * [`index`] provides bounded monotone [`Ring`](index::Ring) and
 //!   [`IndexSet`](index::IndexSet) storage.
-//! * [`weight`] separates sparse edge coefficients from their residual-field
-//!   embedding.
+//! * [`weight`] provides zero-sized binary edges and non-zero field weights,
+//!   with same-field residual embedding.
 //! * [`peel`] owns the shrinking sparse graph, reverse adjacency, and cascade.
 //! * [`residual`] assembles explicit-column systems and solves them to full RREF.
 //! * [`driver`] runs the peel → solve → re-peel fixpoint.
@@ -85,8 +87,9 @@ pub use crate::driver::{DenseRows, Resolver};
 pub use crate::error::{GraphError, SolveError};
 pub use crate::id::{CheckId, VarId};
 pub use crate::neighbors::{
-    Edges, ExplicitMatrix, NeighborBuf, NeighborGen, Rfc5053Triple, Uniform, WindowedUniform,
+    Edges, ExplicitMatrix, NeighborBuf, NeighborGen, Rfc5053Triple, Uniform, WeightedUniform,
+    WeightedWindowedUniform, WindowedUniform,
 };
 pub use crate::peel::{Peeler, PoolConfig, StalledRow, VariableState};
 pub use crate::residual::{DenseRow, Report, ResidualBuilder, Row, RowSink, Solver, System};
-pub use crate::weight::{Binary, EdgeWeight, ResidualCoeff};
+pub use crate::weight::{Binary, EdgeWeight, ResidualCoeff, Weighted};

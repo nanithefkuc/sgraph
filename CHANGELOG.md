@@ -11,8 +11,8 @@ version-comparison links are provided.
 
 Initial release of the shared sparse/Tanner-graph engine for erasure codes:
 deterministic cross-peer neighbour generation, degree distributions, a residual
-sparse graph, XOR-only peeling, and the exact residual solve that finishes what
-peeling cannot. Complete for the binary (GF(2)) path.
+sparse graph, binary and field-weighted peeling, and the exact residual solve
+that finishes what peeling cannot.
 
 ### Added
 
@@ -27,17 +27,17 @@ peeling cannot. Complete for the binary (GF(2)) path.
   live, absent, and retired states; every growth path checks the configured live
   span and the `u64`→`usize` conversion, rejecting input rather than evicting
   state.
-- **Edge-weight seams** (`weight`): `EdgeWeight` and `ResidualCoeff<F>`, plus
-  `Binary`, a zero-sized GF(2) coefficient, so one generic engine serves GF(2)
-  and GF(2^m) without taxing the binary path.
+- **Edge weights** (`weight`): `EdgeWeight` and `ResidualCoeff<F>`, zero-sized
+  `Binary`, and non-zero `Weighted<F>` coefficients with multiply-add folding,
+  degree-one inverse scaling, and same-field residual embedding.
 - **Degree distributions** (`degree`): `DegreeDistribution` with `Constant` (a
   point mass that consumes no randomness), `Cumulative` (an explicit integer
   weight table), and `RobustSoliton` (built from Q32 fixed-point parameters for
   platform-identical tables).
-- **Neighbour generators** (`neighbors`): `NeighborGen` with `Uniform`,
-  `WindowedUniform`, `Rfc5053Triple` (RFC 5053 Raptor), and `ExplicitMatrix`
-  (CSR parity-check) generators, the reusable `NeighborBuf` scratch, and `Edges`,
-  the single validated edge-shape boundary.
+- **Neighbour generators** (`neighbors`): binary and weighted fixed/windowed
+  uniform generators with separate topology and coefficient domains,
+  `Rfc5053Triple` (RFC 5053 Raptor), `ExplicitMatrix` CSR ingestion, reusable
+  `NeighborBuf` scratch, and the validated `Edges` boundary.
 - **Peeling decoder** (`peel`): `Peeler` with the residual sparse graph, reverse
   adjacency, the iterative degree-one cascade, pooled buffers, explicit
   retirement, and `StalledRow` exposing what peeling could not finish.
@@ -53,8 +53,8 @@ peeling cannot. Complete for the binary (GF(2)) path.
 - Frozen determinism fixtures under `tests/data/`, asserted by
   `tests/vectors.rs` against values captured from an independent implementation,
   and `tests/zero_alloc.rs` counting-allocator proofs for steady-state hot paths.
-- Criterion benchmarks (`benches/graph.rs`) covering neighbour generation,
-  ingest, cascade, and residual solve.
+- Criterion benchmarks covering neighbour generation, binary ingest/cascade,
+  weighted cascade, and residual solve.
 - Feature flags: `std` (default), `simd` (default, implies `std`), and
   `internals` for unstable APIs exempt from compatibility guarantees.
   `no_std` + `alloc` without default features.

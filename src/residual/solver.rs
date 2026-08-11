@@ -83,42 +83,13 @@ impl<F: FieldKernels> Solver<F> {
         debug_assert_eq!(system.coefficients.len(), coefficient_bytes);
         debug_assert_eq!(system.symbols.len(), symbol_bytes);
 
-        if self.decomposition.is_none()
-            || system.rows > self.capacity_rows
-            || columns > self.capacity_columns
-            || system.symbol_len > self.capacity_symbol_len
-        {
-            self.capacity_rows = system.rows;
-            self.capacity_columns = columns;
-            self.capacity_symbol_len = system.symbol_len;
-            let symbol_columns = self.capacity_symbol_len / F::BYTES;
-            let Some(coefficients) =
-                Matrix::<F>::zeros(self.capacity_rows, self.capacity_columns).ok()
-            else {
-                return Err(geometry_error::<F>(system.rows, columns, system.symbol_len));
-            };
-            let Some(rhs) = Matrix::<F>::zeros(self.capacity_rows, symbol_columns).ok() else {
-                return Err(geometry_error::<F>(system.rows, columns, system.symbol_len));
-            };
-            let Some(solution) = Matrix::<F>::zeros(self.capacity_columns, symbol_columns).ok()
-            else {
-                return Err(geometry_error::<F>(system.rows, columns, system.symbol_len));
-            };
-            let Some(rref) =
-                Matrix::<F>::zeros(self.capacity_rows, self.capacity_columns).ok()
-            else {
-                return Err(geometry_error::<F>(system.rows, columns, system.symbol_len));
-            };
-            self.decomposition = Some(Ple::decompose(coefficients, &mut self.ple_scratch));
-            self.rhs = Some(rhs);
-            self.solution = Some(solution);
-            self.rref = Some(rref);
-        }
+        self.ensure_capacity(system.rows, columns, system.symbol_len)?;
 
         let coefficient_stride = columns * F::BYTES;
-        let decomposition = self.decomposition.as_mut().ok_or_else(|| {
-            geometry_error::<F>(system.rows, columns, system.symbol_len)
-        })?;
+        let decomposition = self
+            .decomposition
+            .as_mut()
+            .ok_or_else(|| geometry_error::<F>(system.rows, columns, system.symbol_len))?;
         decomposition.redecompose_with(&mut self.ple_scratch, |matrix| {
             for row in 0..system.rows {
                 matrix.row_mut(row)[..coefficient_stride].copy_from_slice(
@@ -190,6 +161,38 @@ impl<F: FieldKernels> Solver<F> {
         })
     }
 
+    fn ensure_capacity(
+        &mut self,
+        rows: usize,
+        columns: usize,
+        symbol_len: usize,
+    ) -> Result<(), SolveError> {
+        if self.decomposition.is_some()
+            && rows <= self.capacity_rows
+            && columns <= self.capacity_columns
+            && symbol_len <= self.capacity_symbol_len
+        {
+            return Ok(());
+        }
+        self.capacity_rows = rows;
+        self.capacity_columns = columns;
+        self.capacity_symbol_len = symbol_len;
+        let symbol_columns = self.capacity_symbol_len / F::BYTES;
+        let error = || geometry_error::<F>(rows, columns, symbol_len);
+        let coefficients =
+            Matrix::<F>::zeros(self.capacity_rows, self.capacity_columns).map_err(|_| error())?;
+        let rhs = Matrix::<F>::zeros(self.capacity_rows, symbol_columns).map_err(|_| error())?;
+        let solution =
+            Matrix::<F>::zeros(self.capacity_columns, symbol_columns).map_err(|_| error())?;
+        let rref =
+            Matrix::<F>::zeros(self.capacity_rows, self.capacity_columns).map_err(|_| error())?;
+        self.decomposition = Some(Ple::decompose(coefficients, &mut self.ple_scratch));
+        self.rhs = Some(rhs);
+        self.solution = Some(solution);
+        self.rref = Some(rref);
+        Ok(())
+    }
+
     /// Borrow uniquely determined values until the next solve.
     pub fn recovered(&self) -> impl Iterator<Item = (VarId, &[u8])> {
         let columns = &self.columns;
@@ -201,8 +204,7 @@ impl<F: FieldKernels> Solver<F> {
                 .copied()
                 .enumerate()
                 .filter_map(move |(column, var)| {
-                    determined[column]
-                        .then_some((var, &solution.row(column)[..symbol_len]))
+                    determined[column].then_some((var, &solution.row(column)[..symbol_len]))
                 })
         })
     }
@@ -229,4 +231,3 @@ impl<F: FieldKernels> Solver<F> {
         self.symbol_len = 0;
     }
 }
-

@@ -10,9 +10,9 @@ your own agent before using.
 `sgraph` is the layer that LDPC, LT, and Raptor-class implementations keep
 re-implementing: deterministic cross-peer neighbour generation, degree
 distributions, a residual sparse graph that shrinks as symbols become known,
-XOR-only peeling, and the exact residual solve that finishes what peeling
-cannot. These codes differ in how their graph is generated, not in how it is
-consumed.
+binary and field-weighted peeling, and the exact residual solve that finishes
+what peeling cannot. These codes differ in how their graph is generated, not in
+how it is consumed.
 
 Field arithmetic and byte-buffer vector primitives come from
 [`fgf`](https://github.com/nanithefkuc/fgf), while
@@ -23,9 +23,10 @@ stay with the consumer.
 
 The crate root carries `#![forbid(unsafe_code)]`, and steady state allocates
 nothing: scratch is owned and reused, and retirement recycles buffers rather
-than dropping them. `Binary` — a zero-sized GF(2) coefficient — is the
-implemented `EdgeWeight`; `ResidualCoeff<F>` embeds it into any `fgf` field, so
-one generic engine serves GF(2) and GF(2^m) without taxing the binary path.
+than dropping them. `Binary` is a zero-sized GF(2) coefficient;
+`Weighted<F>` stores a non-zero coefficient in its own `fgf` field. The same
+generic engine handles XOR folding, field multiply-add, and degree-one inverse
+scaling without taxing the binary path.
 
 ## Usage
 
@@ -89,9 +90,9 @@ bugs get in.
 | --- | --- |
 | `rng` | `SplitMix64`, unbiased bounded draws over a `NonZeroU32`, and Floyd distinct-k sampling. Allocation-free, and validated before it writes. |
 | `index` | `Ring<T>` and `IndexSet`: dense index-keyed storage over a monotone `u64` domain, where a lookup is a subtraction and retirement is a front drain that hands back what it dropped. Bounded by a configured live span. |
-| `weight` | `EdgeWeight` and `ResidualCoeff<F>`, plus `Binary` — a zero-sized GF(2) coefficient, so one generic engine serves GF(2) and GF(2^m) without taxing the binary path. |
+| `weight` | `EdgeWeight` and `ResidualCoeff<F>`, `Binary` for zero-cost GF(2) edges, and non-zero `Weighted<F>` coefficients that embed only into their own field. |
 | `degree` | `DegreeDistribution` with `Constant` (a point mass that consumes no randomness), `Cumulative` (an explicit integer weight table), and `RobustSoliton` (built from Q32 fixed-point parameters, so the table is identical on every platform). |
-| `neighbors` | `NeighborGen` with the `Uniform`, `WindowedUniform`, `Rfc5053Triple` (RFC 5053 Raptor, not RaptorQ) and `ExplicitMatrix` (CSR parity-check) generators, the reusable `NeighborBuf` scratch, and `Edges` — the one place edge shape is validated. |
+| `neighbors` | Binary and weighted uniform generators, `Rfc5053Triple` (RFC 5053 Raptor, not RaptorQ), `ExplicitMatrix` CSR ingestion, reusable `NeighborBuf` scratch, and validated `Edges`. Weighted generators separate topology and coefficient streams with caller-supplied domains. |
 | `peel` | `Peeler`: the residual sparse graph, reverse adjacency, iterative degree-one cascade, pooled buffers, and explicit retirement. `StalledRow` exposes what peeling could not finish. |
 | `residual` | `ResidualBuilder`/`RowSink` single-pass assembly over explicit columns, and a reusable `Solver` delegating elimination to `gfm`. |
 | `driver` | `DenseRows`, the consumer seam for progressively reduced dense equations, and `Resolver`, the peel → solve → re-peel fixpoint. |
@@ -112,12 +113,13 @@ cargo test --all-features
 
 ## Benchmarks
 
-`cargo bench --bench graph` covers neighbour generation, ingest, cascade, and
-residual solve. The numbers below are the minimum of three runs pinned to one
-core, on an Intel Core Ultra 7 258V under Linux 7.1 with `rustc 1.93.0`,
-`--all-features`, `lto = "thin"`, and 1024-byte symbols. They describe this
-machine and this geometry; re-measure before quoting them anywhere else, and
-compare only interleaved, core-pinned runs of the two builds.
+`cargo bench --bench graph` covers neighbour generation, binary ingest/cascade,
+and residual solve; `cargo bench --bench weighted` covers weighted cascade. The
+numbers below are the minimum of three runs pinned to one core, on an Intel Core
+Ultra 7 258V under Linux 7.1 with `rustc 1.93.0`, `--all-features`,
+`lto = "thin"`, and 1024-byte symbols.
+They describe this machine and this geometry; re-measure before quoting them
+anywhere else, and compare only interleaved, core-pinned runs of the two builds.
 
 | Case | Geometry | Per operation |
 | --- | --- | --- |

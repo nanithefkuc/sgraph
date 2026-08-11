@@ -1,11 +1,12 @@
 use super::{Peeler, PoolConfig, VariableState};
 use crate::{
     Binary, CheckId, Constant, EdgeWeight, Edges, GraphError, NeighborBuf, NeighborGen, VarId,
-    WindowedUniform,
+    Weighted, WindowedUniform,
 };
 use alloc::vec;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
+use fgf::{Gf8, Gf16, gf8};
 
 const NEIGHBOR_DOMAIN: u64 = 0xA5A5_5A5A_C3C3_3C3C;
 
@@ -512,4 +513,138 @@ fn construction_rejects_invalid_symbol_geometry() {
         Peeler::<ZeroWidth>::new(4, config(8)),
         Err(GraphError::ZeroElementBytes)
     ));
+}
+
+fn weighted_rhs(terms: &[(gf8::Elem, &[u8])]) -> Vec<u8> {
+    let mut rhs = vec![0; terms[0].1.len()];
+    for &(coefficient, value) in terms {
+        for (out, source) in rhs.iter_mut().zip(value) {
+            *out ^= coefficient.mul(gf8::Elem(*source)).0;
+        }
+    }
+    rhs
+}
+
+fn gf8_weights(values: &[u8]) -> Vec<Weighted<Gf8>> {
+    values
+        .iter()
+        .map(|&value| Weighted::new(gf8::Elem(value)).unwrap())
+        .collect()
+}
+
+#[test]
+fn weighted_construction_rejects_ragged_symbols() {
+    assert!(matches!(
+        Peeler::<Weighted<Gf16>>::new(3, config(8)),
+        Err(GraphError::SymbolAlignment {
+            length: 3,
+            element_bytes: 2
+        })
+    ));
+}
+
+#[test]
+fn weighted_peeling_folds_scales_and_cascades() {
+    let values = [
+        vec![0x12, 0x34, 0x56, 0x78],
+        vec![0x9a, 0xbc, 0xde, 0xf0],
+        vec![0x55, 0xaa, 0x11, 0x22],
+    ];
+    let ids = [VarId::new(0), VarId::new(1), VarId::new(2)];
+    let first_weights = gf8_weights(&[3, 5]);
+    let second_weights = gf8_weights(&[7, 11]);
+    let singleton_weight = gf8_weights(&[13]);
+    let first_rhs = weighted_rhs(&[(gf8::Elem(3), &values[0]), (gf8::Elem(5), &values[1])]);
+    let second_rhs = weighted_rhs(&[(gf8::Elem(7), &values[1]), (gf8::Elem(11), &values[2])]);
+    let singleton_rhs = weighted_rhs(&[(gf8::Elem(13), &values[0])]);
+
+    let mut peeler = Peeler::<Weighted<Gf8>>::new(4, config(16)).unwrap();
+    peeler
+        .push_check(
+            CheckId::new(0),
+            Edges::new(&ids[..2], &first_weights).unwrap(),
+            &first_rhs,
+        )
+        .unwrap();
+    peeler
+        .push_check(
+            CheckId::new(1),
+            Edges::new(&ids[1..], &second_weights).unwrap(),
+            &second_rhs,
+        )
+        .unwrap();
+    peeler
+        .push_check(
+            CheckId::new(2),
+            Edges::new(&ids[..1], &singleton_weight).unwrap(),
+            &singleton_rhs,
+        )
+        .unwrap();
+    for (id, value) in ids.into_iter().zip(&values) {
+        assert_eq!(peeler.variable_state(id), VariableState::Known(value));
+    }
+
+    let mut reordered = Peeler::<Weighted<Gf8>>::new(4, config(16)).unwrap();
+    reordered.learn_copy(ids[1], &values[1]).unwrap();
+    reordered
+        .push_check(
+            CheckId::new(0),
+            Edges::new(&ids[..2], &first_weights).unwrap(),
+            &first_rhs,
+        )
+        .unwrap();
+    assert_eq!(
+        reordered.variable_state(ids[0]),
+        VariableState::Known(&values[0])
+    );
+}
+
+#[test]
+fn binary_and_weighted_peeling_share_stopping_sets() {
+    let values = [vec![0x21; 16], vec![0x43; 16], vec![0x65; 16]];
+    let ids = [VarId::new(0), VarId::new(1), VarId::new(2)];
+    let supports = [&ids[..2], &ids[1..]];
+    let binary_rhs = [
+        weighted_rhs(&[(gf8::Elem::ONE, &values[0]), (gf8::Elem::ONE, &values[1])]),
+        weighted_rhs(&[(gf8::Elem::ONE, &values[1]), (gf8::Elem::ONE, &values[2])]),
+    ];
+    let coefficients = [gf8_weights(&[3, 5]), gf8_weights(&[7, 11])];
+    let weighted_rhs = [
+        weighted_rhs(&[(gf8::Elem(3), &values[0]), (gf8::Elem(5), &values[1])]),
+        weighted_rhs(&[(gf8::Elem(7), &values[1]), (gf8::Elem(11), &values[2])]),
+    ];
+
+    let mut binary = Peeler::<Binary>::new(16, config(16)).unwrap();
+    let mut weighted = Peeler::<Weighted<Gf8>>::new(16, config(16)).unwrap();
+    for check in 0..2 {
+        binary
+            .push_check(
+                CheckId::new(check as u64),
+                Edges::new(supports[check], &[Binary; 2]).unwrap(),
+                &binary_rhs[check],
+            )
+            .unwrap();
+        weighted
+            .push_check(
+                CheckId::new(check as u64),
+                Edges::new(supports[check], &coefficients[check]).unwrap(),
+                &weighted_rhs[check],
+            )
+            .unwrap();
+    }
+    assert_eq!(binary.unresolved_count(), weighted.unresolved_count());
+    assert_eq!(binary.unresolved_count(), 2);
+
+    binary.learn_copy(ids[1], &values[1]).unwrap();
+    weighted.learn_copy(ids[1], &values[1]).unwrap();
+    let mut binary_recovered: Vec<_> = binary.drain_recovered().collect();
+    let mut weighted_recovered: Vec<_> = weighted.drain_recovered().collect();
+    binary_recovered.sort_unstable();
+    weighted_recovered.sort_unstable();
+    assert_eq!(binary_recovered, weighted_recovered);
+    assert_eq!(binary_recovered, vec![ids[0], ids[2]]);
+    for (id, value) in ids.into_iter().zip(&values) {
+        assert_eq!(binary.variable_state(id), VariableState::Known(value));
+        assert_eq!(weighted.variable_state(id), VariableState::Known(value));
+    }
 }

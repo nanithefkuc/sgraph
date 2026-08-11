@@ -18,7 +18,7 @@ use fgf::{Gf8, gf8};
 use sgraph::index::IndexSet;
 use sgraph::{
     Binary, CheckId, DenseRows, Edges, Peeler, PoolConfig, ResidualBuilder, Resolver, RowSink,
-    SolveError, Solver, VarId, VariableState,
+    SolveError, Solver, VarId, VariableState, Weighted,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 
@@ -53,11 +53,12 @@ unsafe impl GlobalAlloc for Counting {
 static ALLOC: Counting = Counting;
 
 #[test]
-fn binary_weights_are_allocation_free() {
+fn steady_state_paths_are_allocation_free() {
     growing_a_binary_weight_vector_never_allocates();
     binary_weight_operations_are_free();
     warm_edge_generation_never_allocates();
     warm_peeling_stream_never_allocates();
+    warm_weighted_peeling_stream_never_allocates();
     warm_resolver_fixpoint_never_allocates();
     the_counter_observes_a_real_allocation();
 }
@@ -173,6 +174,72 @@ fn warm_peeling_stream_never_allocates() {
         counted, 0,
         "warmed 1,200-symbol ingest/cascade/retirement stream allocated {counted} times"
     );
+}
+
+fn warm_weighted_peeling_stream_never_allocates() {
+    use core::num::NonZeroUsize;
+
+    const SYMBOL_LEN: usize = 32;
+    const WARM_BATCHES: u64 = 32;
+    const MEASURED_BATCHES: u64 = 600;
+
+    let span = NonZeroUsize::new(8).expect("non-zero span");
+    let config = PoolConfig::new(span, span).with_pool_capacity(8);
+    let mut peeler = Peeler::<Weighted<Gf8>>::new(SYMBOL_LEN, config).expect("valid peeler");
+    let mut recovered = Vec::with_capacity(2);
+    for batch in 0..WARM_BATCHES {
+        weighted_peel_two(&mut peeler, &mut recovered, batch);
+    }
+
+    let before = ALLOCS.load(Relaxed);
+    for batch in WARM_BATCHES..WARM_BATCHES + MEASURED_BATCHES {
+        weighted_peel_two(&mut peeler, &mut recovered, batch);
+    }
+    let counted = ALLOCS.load(Relaxed) - before;
+    assert_eq!(
+        counted, 0,
+        "warmed weighted ingest/cascade/retirement stream allocated {counted} times"
+    );
+}
+
+fn weighted_peel_two(peeler: &mut Peeler<Weighted<Gf8>>, recovered: &mut Vec<VarId>, batch: u64) {
+    const SYMBOL_LEN: usize = 32;
+
+    let first = VarId::new(batch * 2);
+    let second = VarId::new(batch * 2 + 1);
+    let first_value = [batch as u8; SYMBOL_LEN];
+    let second_value = [batch.wrapping_mul(17) as u8; SYMBOL_LEN];
+    let pair_weights = [
+        Weighted::new(gf8::Elem(3)).expect("non-zero"),
+        Weighted::new(gf8::Elem(5)).expect("non-zero"),
+    ];
+    let singleton_weight = [Weighted::new(gf8::Elem(7)).expect("non-zero")];
+    let mut pair_rhs = [0u8; SYMBOL_LEN];
+    fgf::ops::mul_add::<Gf8>(&mut pair_rhs, gf8::Elem(3), &first_value);
+    fgf::ops::mul_add::<Gf8>(&mut pair_rhs, gf8::Elem(5), &second_value);
+    let mut singleton_rhs = [0u8; SYMBOL_LEN];
+    fgf::ops::mul_add::<Gf8>(&mut singleton_rhs, gf8::Elem(7), &first_value);
+
+    peeler
+        .push_check(
+            CheckId::new(batch * 2),
+            Edges::new(&[first, second], &pair_weights).expect("valid pair"),
+            &pair_rhs,
+        )
+        .expect("pair ingests");
+    peeler
+        .push_check(
+            CheckId::new(batch * 2 + 1),
+            Edges::new(&[first], &singleton_weight).expect("valid singleton"),
+            &singleton_rhs,
+        )
+        .expect("singleton ingests");
+    recovered.clear();
+    peeler.drain_recovered_into(recovered);
+    assert_eq!(recovered, &[first, second]);
+    peeler
+        .retire_below(VarId::new(batch * 2 + 2))
+        .expect("monotone retirement");
 }
 
 fn peel_two(peeler: &mut Peeler<Binary>, recovered: &mut Vec<VarId>, batch: u64) {

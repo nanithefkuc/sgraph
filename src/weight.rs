@@ -105,6 +105,97 @@ impl<F: FieldKernels> ResidualCoeff<F> for Binary {
         F::Elem::ONE
     }
 }
+/// A non-zero edge coefficient over `F`.
+///
+/// Construction rejects zero, so a stored weighted edge is always invertible
+/// when peeling reaches degree one. `Default` is the multiplicative identity,
+/// which keeps generic scratch growth valid without introducing a zero edge.
+///
+/// A weighted coefficient embeds only into its own field:
+///
+/// ```compile_fail
+/// use fgf::{Gf8, Gf16};
+/// use sgraph::{ResidualCoeff, Weighted};
+///
+/// fn cross_field(_: impl ResidualCoeff<Gf16>) {}
+/// let coefficient = Weighted::<Gf8>::one();
+/// cross_field(coefficient);
+/// ```
+#[derive(Clone, Copy)]
+pub struct Weighted<F: FieldKernels> {
+    value: F::Elem,
+}
+
+impl<F: FieldKernels> Weighted<F> {
+    /// Construct a non-zero coefficient, or return `None` for zero.
+    #[inline]
+    #[must_use]
+    pub fn new(value: F::Elem) -> Option<Self> {
+        (!value.is_zero()).then_some(Self { value })
+    }
+
+    /// The underlying field element.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> F::Elem {
+        self.value
+    }
+}
+
+impl<F: FieldKernels> PartialEq for Weighted<F> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<F: FieldKernels> Eq for Weighted<F> {}
+
+impl<F: FieldKernels> Default for Weighted<F> {
+    fn default() -> Self {
+        Self::one()
+    }
+}
+
+impl<F: FieldKernels> core::fmt::Debug for Weighted<F> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Weighted").field(&self.value).finish()
+    }
+}
+
+impl<F: FieldKernels + 'static> EdgeWeight for Weighted<F> {
+    const ELEMENT_BYTES: usize = F::BYTES;
+
+    #[inline]
+    fn one() -> Self {
+        Self {
+            value: F::Elem::ONE,
+        }
+    }
+
+    #[inline]
+    fn is_zero(self) -> bool {
+        self.value.is_zero()
+    }
+
+    #[inline]
+    fn mul_add(dst: &mut [u8], weight: Self, src: &[u8]) {
+        debug_assert_eq!(dst.len(), src.len(), "mul_add: length mismatch");
+        fgf::ops::mul_add::<F>(dst, weight.value, src);
+    }
+
+    #[inline]
+    fn scale_inv(value: &mut [u8], weight: Self) {
+        debug_assert!(!weight.value.is_zero());
+        fgf::ops::mul_assign::<F>(value, weight.value.inv());
+    }
+}
+
+impl<F: FieldKernels + 'static> ResidualCoeff<F> for Weighted<F> {
+    #[inline]
+    fn coefficient(self) -> F::Elem {
+        self.value
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -112,7 +203,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::mem::size_of;
-    use fgf::{Gf16, gf8, gf16};
+    use fgf::{Field, Gf16, gf8, gf16};
 
     #[test]
     fn binary_is_zero_sized() {
@@ -204,5 +295,45 @@ mod tests {
             x.mul(<Binary as ResidualCoeff<Gf8>>::coefficient(Binary)),
             x
         );
+    }
+
+    #[test]
+    fn weighted_rejects_zero_and_embeds_in_its_field() {
+        assert!(Weighted::<Gf8>::new(gf8::Elem::ZERO).is_none());
+        let coefficient = Weighted::<Gf8>::new(gf8::Elem(0xb7)).unwrap();
+        assert_eq!(coefficient.get(), gf8::Elem(0xb7));
+        assert_eq!(
+            <Weighted<Gf8> as ResidualCoeff<Gf8>>::coefficient(coefficient),
+            gf8::Elem(0xb7)
+        );
+        assert_eq!(Weighted::<Gf8>::default(), Weighted::<Gf8>::one());
+    }
+
+    #[test]
+    fn weighted_kernels_cover_elements_vectors_and_tails() {
+        let coefficient = gf16::Elem(0x1234);
+        let weight = Weighted::<Gf16>::new(coefficient).unwrap();
+        for len in [Gf16::BYTES, 64, 66] {
+            let src: Vec<u8> = (0..len)
+                .map(|index| (index as u8).wrapping_mul(29).wrapping_add(7))
+                .collect();
+            let mut expected = Vec::with_capacity(len);
+            for encoded in src.chunks_exact(2) {
+                let value = gf16::Elem(u16::from_le_bytes([encoded[0], encoded[1]]));
+                expected.extend_from_slice(&value.mul(coefficient).0.to_le_bytes());
+            }
+
+            let mut actual = vec![0u8; len];
+            Weighted::<Gf16>::mul_add(&mut actual, weight, &src);
+            assert_eq!(actual, expected, "multiply-add mismatch at len {len}");
+            Weighted::<Gf16>::scale_inv(&mut actual, weight);
+            assert_eq!(actual, src, "inverse scaling mismatch at len {len}");
+
+            let mut identity = vec![0u8; len];
+            Weighted::<Gf16>::mul_add(&mut identity, Weighted::one(), &src);
+            assert_eq!(identity, src, "identity mismatch at len {len}");
+            Weighted::<Gf16>::mul_add(&mut identity, Weighted::one(), &src);
+            assert!(identity.iter().all(|byte| *byte == 0));
+        }
     }
 }

@@ -13,10 +13,13 @@ use crate::rng::{SplitMix64, sample_distinct, seed_for};
 use crate::weight::{Binary, EdgeWeight};
 
 /// Largest domain a `u32` offset can address.
-const MAX_DOMAIN: u64 = u32::MAX as u64;
+pub(super) const MAX_DOMAIN: u64 = u32::MAX as u64;
 
 /// Validate a degree distribution against a domain width.
-fn check_degree<D: DegreeDistribution>(degree: &D, domain: u64) -> Result<u32, GraphError> {
+pub(super) fn check_degree<D: DegreeDistribution>(
+    degree: &D,
+    domain: u64,
+) -> Result<u32, GraphError> {
     if domain == 0 {
         return Err(GraphError::EmptyDomain);
     }
@@ -41,7 +44,7 @@ fn check_degree<D: DegreeDistribution>(degree: &D, domain: u64) -> Result<u32, G
 /// consumes nothing, leaving the offsets identical to a bare
 /// `SplitMix64::new(seed)` sampling, which is what preserves wire compatibility
 /// with a constant-degree code.
-fn draw_offsets<D: DegreeDistribution, W: EdgeWeight>(
+pub(super) fn draw_offsets<D: DegreeDistribution, W: EdgeWeight>(
     seed: u64,
     span: u32,
     cap: u32,

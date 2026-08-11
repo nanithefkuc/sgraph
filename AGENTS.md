@@ -168,6 +168,10 @@ as much as it serves LT and Raptor.
 - `EdgeWeight::ELEMENT_BYTES` is what lets a symbol length be validated for
   packed-element alignment once, before any `fgf` kernel can reach its panicking
   geometry check.
+- `Weighted<F>` contains only non-zero elements. Weight generation uses one
+  little-endian `SplitMix64` draw per candidate, rejects zero with a complete
+  extra draw, and has a domain separate from topology so coefficients cannot
+  perturb neighbour selection.
 
 ## Layout
 
@@ -178,10 +182,11 @@ src/
   id.rs              VarId / CheckId transparent newtypes
   rng.rs             deterministic PRNG (SplitMix64) + distinct-k sampling
   index.rs           bounded dense index-keyed storage (Ring, IndexSet)
-  weight.rs          EdgeWeight / ResidualCoeff seams; Binary (ZST)
+  weight.rs          EdgeWeight / ResidualCoeff; Binary and Weighted<F>
   degree.rs          DegreeDistribution + Constant, Cumulative, RobustSoliton
   neighbors/mod.rs   NeighborGen, NeighborBuf scratch, validated Edges
-  neighbors/uniform.rs   Uniform and WindowedUniform generators
+  neighbors/uniform.rs   binary Uniform and WindowedUniform
+  neighbors/weighted.rs  weighted fixed/windowed uniform generators
   neighbors/triple.rs    Rfc5053Triple (RFC 5053 Raptor only)
   neighbors/explicit.rs  ExplicitMatrix, a validated CSR parity-check matrix
   peel/              residual rows, Peeler, retirement, and buffer pools
@@ -192,5 +197,6 @@ tests/
   zero_alloc.rs      counting-allocator proofs for steady-state hot paths
   data/              captured PRNG and edge-offset fixtures, with provenance
 benches/
-  graph.rs           criterion: neighbours, ingest, cascade, residual solve
+  graph.rs           criterion: neighbours, binary peel, residual solve
+  weighted.rs        criterion: field-weighted peeling
 ```

@@ -35,6 +35,10 @@ criterion = { version = "0.8", default-features = false, features = [
 name = "graph"
 harness = false
 
+[[bench]]
+name = "weighted"
+harness = false
+
 [features]
 default = ["std", "simd"]
 # Standard library. Required for runtime CPU detection and process-wide caches.

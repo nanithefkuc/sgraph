@@ -19,10 +19,12 @@
 mod explicit;
 mod triple;
 mod uniform;
+mod weighted;
 
 pub use explicit::ExplicitMatrix;
 pub use triple::Rfc5053Triple;
 pub use uniform::{Uniform, WindowedUniform};
+pub use weighted::{WeightedUniform, WeightedWindowedUniform};
 
 use crate::error::GraphError;
 use crate::id::{CheckId, VarId};
@@ -154,6 +156,29 @@ impl<W: EdgeWeight> NeighborBuf<W> {
         weights.clear();
         support.extend(offsets[..count].iter().map(|&off| map(off)));
         weights.extend(core::iter::repeat_n(weight, count));
+    }
+    pub(super) fn fill_from_offsets_with(
+        &mut self,
+        count: usize,
+        mut map: impl FnMut(u32) -> (VarId, W),
+    ) {
+        assert!(
+            count <= self.offsets.len(),
+            "fill_from_offsets_with: count {count} past scratch of {}",
+            self.offsets.len()
+        );
+        let Self {
+            support,
+            weights,
+            offsets,
+        } = self;
+        support.clear();
+        weights.clear();
+        for &offset in &offsets[..count] {
+            let (var, weight) = map(offset);
+            support.push(var);
+            weights.push(weight);
+        }
     }
 
     /// Number of edges held.
