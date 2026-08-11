@@ -126,7 +126,7 @@ anywhere else, and compare only interleaved, core-pinned runs of the two builds.
 | `WindowedUniform` neighbours | span 4096, degree 3 / 8 / 32 | 9.9 ns / 20.9 ns / 120 ns per check |
 | `Peeler::push_check` (no ripple) | degree 3 / 8 / 32, 64 live rows | 138 ns / 179 ns / 436 ns per check |
 | Peeling cascade | chain of 16 / 256 hops | 1.18 µs / 22.5 µs per chain |
-| Residual RREF over GF(256) | 8×8 / 32×32 / 64×64 | 1.22 µs / 18.9 µs / 84.7 µs per solve |
+| Residual RREF over GF(256) | 8×8 / 32×32 / 64×64 | 1.64 µs / 25.1 µs / 112.5 µs per solve |
 
 ## License
 
